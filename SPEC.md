@@ -427,8 +427,17 @@ component and the source of most bugs in comparable implementations.
    append.
 3. `ArrowLeft` appears to skip a cell unless direction is inferred by comparing against the
    previous selection range, with a guard for the transition out of append mode.
-4. No browser fires `selectionchange` on deletion or cut. Detect a shrinking value in the
-   input handler and dispatch the event manually.
+4. ~~No browser fires `selectionchange` on deletion or cut. Detect a shrinking value in the
+   input handler and dispatch the event manually.~~ **Disproved in `W-3`, and no manual
+   dispatch is implemented.** Chromium and Firefox both fire `selectionchange` after a
+   Backspace deletion *and* after a cut: with the listener removed the post-deletion test
+   fails, so the re-widening demonstrably runs off a real browser-fired event.
+
+   **Still unverified:** Safari/WebKit, which is not in the automated matrix (§14.3), and
+   deletion paths other than Backspace — `Delete`, and deletion via the iOS long-press menu.
+   If one of those turns out not to fire, the manual dispatch comes back **for that path
+   only**. It is not implemented speculatively, because a behaviour with no failing test is a
+   behaviour nobody can show is needed.
 5. **Always pass the third `direction` argument** to `setSelectionRange` — omitting it
    defaults to `forward` and collapses backward selections in Firefox.
 
