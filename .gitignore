@@ -1,0 +1,21 @@
+# OMC operational state (see CLAUDE-omc.md; .omc/skills/** is the committable exception)
+.omc/
+!.omc/skills/
+
+# Node
+node_modules/
+*.log
+.DS_Store
+
+# Build output
+dist/
+web/dist/
+
+# Java / Maven
+target/
+flow/**/target/
+
+# Test artefacts
+coverage/
+screenshots/diff/
+screenshots/current/
