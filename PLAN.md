@@ -219,7 +219,11 @@ event surface has stopped moving (end of `W-7`).
    `@web/test-runner-playwright` + `@web/test-runner-visual-regression`, Playwright `~1.63`.
    Baselines generated in a pinned container.
 4. Lint/format matching Vaadin's conventions, so an upstream PR is a rename not a reformat.
-5. A dev page per SPEC §14.2's states, used for manual work and visual baselines.
+5. A dev page per SPEC §14.2's states, used for manual work and visual baselines. Include a
+   **live state readout** — `value`, `complete`, active cell index, selection range — plus an
+   **event log** for `input`, `value-changed`, `change` and `code-complete`, in that order.
+   The mockup (SPEC §9.2) demonstrates the pattern, and it is the fastest way to see §7.6's
+   user-originated rule and §7.7's commit ordering actually holding.
 6. CI per `P0-6`: push → lint, typecheck, unit (Chromium + Firefox), visual. Flow ITs are
    **not** wired yet — they cannot run until `W-7` (`P0-6.1`).
 7. Commit the `P0-3` canary test into the unit suite.
@@ -286,8 +290,13 @@ assertion that the fast path performs no rewrite.
 
 Implements SPEC §7.9.
 
-1. Render cells from `length`; `cell-index`, `active`, `filled`; synthetic `caret`.
-2. Cells as flex items, `min-width: 24px`, `flex-shrink` — **shrink in CSS, no JS sizing.**
+1. Render cells from `length`; `cell-index`, `active`, `filled`; synthetic `caret`. The
+   **active border is the primary indicator, the caret secondary** (SPEC §9) — the caret must
+   never be the only thing marking the active cell, because `prefers-reduced-motion` stops it
+   blinking and nothing marks a *selected* cell at all.
+2. Cells as flex items, `flex-shrink`, `min-width: 24px` floor — **shrink in CSS, no JS
+   sizing.** Natural height comes from `--vaadin-field-baseline-input-height` so a cell row
+   lines up with a text field beside it (SPEC §9.1).
 3. Input absolutely positioned, out of flow, with the two-reason comment (SPEC §7.9.4).
 4. The single `ResizeObserver`: field height → input `font-size` (SPEC §11.4). Assert no
    second observer and no loop.
@@ -336,14 +345,29 @@ manually and recorded.
 components ship their own base styles and the themes are token layers, so this is one
 stylesheet, not two theme implementations.
 
-1. One base stylesheet as Lit `css`, parameterised by `--vaadin-*` custom properties: reuse
-   the existing `--vaadin-input-field-*` tokens; define `--vaadin-code-field-cell-*` for cell
-   sizing, the accent-border active treatment, the caret and the separator.
+1. One base stylesheet as Lit `css`, **deriving** per SPEC §9.1. **Confirm each row of that
+   table against the pinned packages first — it is provisional.** Cell height must reproduce
+   field-base's own computation (`1lh + --vaadin-padding-block-container × 2 +
+   --vaadin-input-field-border-width × 2`) so a cell row aligns with a text field beside it;
+   `--vaadin-field-baseline-input-height` is an override hook, not a theme-set token. Define
+   `--vaadin-code-field-*` only for gap, radius, active border width, caret and separator
+   colour.
+   Radius follows the platform's own pattern:
+   `var(--vaadin-code-field-cell-radius, var(--vaadin-radius-s))` (SPEC §9.1).
+   Per-state treatment per SPEC §9.1.1, including read-only via
+   `--vaadin-input-field-readonly-border` — source-verified, so nothing here is invented.
 2. Caret blink respecting `prefers-reduced-motion`; tabular numerals;
    invalid/disabled/readonly; dark handled by the tokens.
 3. `ThemeDetectionMixin` (public) only where a token cannot express an Aura/Lumo difference.
    **Never** `LumoInjectionMixin` or `ThemeDetector` — both are documented internal-only.
-3. `small` variant — cell sizing and font only, not chrome spacing.
+   **Target: zero such rules — a target, not a prediction.** The two themes reach the same
+   treatment by different mechanisms in places (read-only: dashed border in Lumo, zeroed
+   surface opacity in Aura). Record every scoped rule added, with its reason, so the count
+   stays visible instead of drifting.
+4. Sanity-check against the mockup's geometry (SPEC §9.2): Aura ≈44×48/6/9px, Lumo
+   ≈40×40/8/8px. Landing far from those means the derivation is wrong, not that the numbers
+   should be hard-coded.
+5. `small` variant — cell sizing and font only, not chrome spacing.
 4. Neither theme may fork behaviour: no theme-specific JS, no overriding the LTR rule or the
    five hiding properties.
 
@@ -464,10 +488,15 @@ change what "supported" means on iOS.
 ### `V11-1` — `groups` and `separator`
 1. `groups="3 3"` parsing, sum validation, console warning on mismatch, `getGroups(): int[]`.
 2. `part="separator"` with `separator-index`; the glyph; theming in both themes.
-3. Selection and caret behaviour across a separator.
-4. **Run SPEC §14.3's new grouped-iOS row before declaring it supported** — §11.10 says
-   native selection cannot track grouped cells, and iOS is where that becomes visible. If it
-   is bad enough, gap-only grouping becomes the fallback and the glyph is opt-in.
+   `separator=""` renders the same element with no glyph — gap-only grouping, free, and
+   purely cosmetic (SPEC §9).
+3. Selection and caret behaviour across a separator. One outline *per group* is rejected —
+   it fragments a cross-boundary selection (SPEC §9).
+4. **Run SPEC §14.3's grouped-iOS row before declaring it supported** — §11.10 says native
+   selection cannot track grouped cells, and iOS is where that becomes visible.
+   **If it is bad, the fallback is not shipping `groups`.** Gap-only is *not* a fallback: the
+   cost is the separator's width, which `separator=""` keeps. A narrower separator is the only
+   partial relief. Treat a bad result as a scope decision, not a default-value tweak.
 5. Visual baselines for the grouped states.
 
 ### `V11-2` — Display options
@@ -530,7 +559,7 @@ simultaneously".
 | **Duplicate `@vaadin/field-base` copies in a consumer app** *(new)* | two `InputMixin` identities; component works in isolation, misbehaves in an app | `peerDependencies: "^25.2.0"` so npm dedupes to the app's copy and a mismatch is a loud install warning (ADR-0001). Exact pinning **causes** this risk rather than mitigating it. |
 | Base `allowedCharPattern` re-enters the paste path on a bump | canary test fails | `_onPaste`/`_onDrop` are **replaced**, not wrapped; the canary must assert we are not calling `super` there. |
 | **Android composition leaks disallowed characters** | — | **OPEN, accepted.** No Android device (§14.3), so the trigger cannot fire: the post-hoc sanitiser ships as an *untested* mitigation for the failure mode it exists for. Alphanumeric ships anyway; README states it plainly. The digits-only fallback remains available if a report arrives. |
-| Grouped separator makes iOS unusable | `V11-1.4` | Gap-only grouping as the default, glyph opt-in. |
+| Grouped separator makes iOS unusable | `V11-1.4` | **Response corrected.** The old answer — "gap-only grouping as the default, glyph opt-in" — does not work: §11.10's cost is the separator's *width*, and `separator=""` keeps the width and drops only the glyph. The real fallback is **not shipping `groups`**, with a narrower separator as a palliative. A scope decision, so `V11-1.4` must be run before `groups` is announced. |
 | ~~Manual device matrix never runs again~~ | no owner | **Mitigated differently.** Naming a solo owner changes nothing; the matrix was instead *trimmed to owned hardware* and gated at `R-1`, with untestable rows marked `UNTESTED` rather than carried as aspiration (§14.3). |
 | Editing model reopened late | `P0-4` | Cheap in Phase 0, expensive after `W-4`. The prototype is still built and reviewed a day later, despite there being no design function — that is the entire reason `P0-4` survives. |
 | **Solo review blind spot** *(new)* | no second reader on any gate | Gates are artefact-shaped (committed recordings, passing tests, written findings) and time-separated from the work that produced them. This is a mitigation, not a fix. |

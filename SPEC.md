@@ -131,8 +131,10 @@ This is a deliberate trade: free parity with every other Vaadin field, in exchan
 coupling to unversioned internal API that changes between minors. Two obligations follow,
 both non-optional:
 
-1. **A single pinned version**, identical in `package.json` and in the Flow module's
-   `@NpmPackage`, bumped only deliberately.
+1. **One bump policy covering two pins** — Maven `25.2.8` and `@NpmPackage` `25.2.11`, moved
+   only deliberately, while `package.json` declares a peer *range*. (v2 said "a single pinned
+   version, identical in both"; that is not achievable — the npm and Maven lines are
+   deliberately decoupled, and `25.2.10` never existed on Maven at all. See ADR-0001.)
 2. **A canary test** whose only job is to fail loudly when the shape of the depended-upon
    mixins changes (asserting the presence and arity of the specific hooks §7.8 overrides).
    Without it, "depend on internals" becomes a decision that gets re-made under pressure.
@@ -220,7 +222,7 @@ ambiguous for every themer. Renamed now; free now, unfixable after release.
 | `blurOnComplete` | `blur-on-complete` | `boolean` | `false` | v1.1 | Blur on user-originated completion. |
 | `complete` | `complete` | `boolean` (read-only, reflected) | | v1 | `value.length === length`. **Not latched** — see §7.7. |
 | `groups` | `groups` | `string` | `''` | v1.1 | Space-separated group sizes, e.g. `"3 3"`. Must sum to `length` or is ignored with a console warning. Purely visual. |
-| `separator` | `separator` | `string` | `'-'` | v1.1 | Glyph rendered between groups. Presentation only; never part of `value`. |
+| `separator` | `separator` | `string` | `'-'` | v1.1 | Glyph rendered between groups. Presentation only; never part of `value`. **`''` yields gap-only grouping** — the element keeps its width, only the glyph goes, so geometry is unchanged and §11.10's cost is unchanged with it (§9). |
 | `mask` | `mask` | `boolean \| string` | `false` | v1.1 | Renders `•` (or the given single character) instead of the actual characters. Does not alter `value`. Not secrecy (§3). |
 | `placeholderChar` | `placeholder-char` | `string` | `''` | v1.1 | Rendered in empty cells. |
 | `i18n` | — | `object` | | v1 | `{ requiredErrorMessage, incompleteErrorMessage }`. Plain strings. |
@@ -526,8 +528,12 @@ the basis that every insertion path already passes through the sanitiser.*
 
 ## 9. Theming
 
-The component ships **no visual opinion**. It exposes structure and state; Lumo and Aura
-each style it.
+The component **ships its own base styles**, parameterised by `--vaadin-*` custom properties.
+Lumo and Aura supply tokens; neither carries a per-component style module.
+
+> *(v2 said "the component ships no visual opinion; Lumo and Aura each style it". That was the
+> Vaadin 24 model and is superseded — see the `P0-2` note below. Any design artefact still
+> repeating that sentence, including the mockup in §9.2, predates the correction.)*
 
 > **`P0-2` resolved — and this section's premise was a Vaadin 24 assumption.** See
 > [P0-FINDINGS.md](./P0-FINDINGS.md). Vaadin 25 has **no `theme/` directories at all**.
@@ -567,8 +573,27 @@ a filled/inverted cell (competes with the `filled` state attribute and hurts car
 character legibility) and over caret-only (weakest affordance on touch, and invisible under
 `prefers-reduced-motion` if the blink is the only signal).
 
+The mockup (§9.2) built all three and reached the same conclusion independently, framing the
+chosen one as *"the same 1px-to-2px outline shift a text field already makes on focus"* — the
+better articulation, because it makes the treatment a **reuse of existing field behaviour**
+rather than a new invention. It also adds an argument against caret-only that this section
+missed: with the blink suppressed, nothing at all marks a cell that is *selected* rather than
+appended to. **The border is the primary indicator and the caret is secondary** — not a pair
+of equals.
+
 **Separator (closed, v1.1):** a **rendered glyph** in `part="separator"`, not a bare gap.
 See §11.10 for its structural cost.
+
+**`separator=""` is gap-only grouping**, and needs no separate API: the separator element
+stays, at its normal width, with no glyph in it. Cell geometry, hit testing, caret placement
+and cross-boundary selection are therefore identical to the glyph case — which is what makes
+it free, and equally what makes it **useless as an iOS mitigation**. §11.10's cost is the
+separator's *width*; removing the character removes none of it. Offer `separator=""` because
+an undashed 6-digit OTP looks better without a dash, not because it fixes anything.
+
+*(Rejected alternative, from the mockup: one outline per group rather than per cell. A
+selection crossing the boundary renders as two disconnected fragments — the same defect §9
+forbids wrapping for — and the active cell has no outline of its own left to thicken.)*
 
 Constraints on both themes:
 
@@ -580,6 +605,124 @@ Constraints on both themes:
 - Cells must not wrap; shrink to the floor, then overflow (§7.9).
 - Do not override the cell row's `direction: ltr` (§7.9.6).
 - Do not restyle the input's five hiding properties (§11.12).
+
+### 9.1 Token derivation — **derive first, invent only what has no analogue**
+
+The base stylesheet derives from the `--vaadin-*` tokens the themes set, so that most of the
+Lumo/Aura difference is encoded in tokens rather than in forked CSS.
+
+> **Status: provisional.** The *mechanism* is confirmed; the exact per-property mapping below
+> is **not fully verified** and `W-8` must confirm each row against the pinned packages before
+> relying on it. What is confirmed: the themes set a **primitive scale**
+> (Aura's `size.css` defines `--vaadin-padding-block-container`, `--vaadin-radius-s`,
+> `--vaadin-gap-*`), and components consume those primitives through computed fallbacks. Do
+> not assume a component-level token exists just because a name appears in a `var()`.
+
+**Cell height must reproduce the field's own height computation**, not invent one, so a cell
+row lines up with a text field beside it. `field-base-styles.js` computes it as:
+
+```
+1lh + --vaadin-padding-block-container × 2 + --vaadin-input-field-border-width × 2
+```
+
+`--vaadin-field-baseline-input-height` is **not** a theme-set token — it appears once in the
+monorepo, as an override hook wrapping that expression. Use the computation; respect the hook.
+
+| Cell property | Source |
+|---|---|
+| Rest outline | `--vaadin-input-field-border-width` / `--vaadin-input-field-border-color` |
+| Cell fill | `--vaadin-input-field-background` — this alone produces the mockup's "Aura outlines, Lumo fills" difference, because the two themes set it differently |
+| Character size / colour | `--vaadin-input-field-value-font-size`, `--vaadin-input-field-value-color` |
+| Disabled | `--vaadin-input-field-disabled-background`, `--vaadin-disabled-cursor` |
+| Read-only | `--vaadin-input-field-readonly-border` — Lumo defaults it to `1px dashed var(--lumo-contrast-30pct)` over a transparent background; Aura instead zeroes its surface opacity |
+| Invalid | `--vaadin-input-field-error-color` |
+| Autofill | `--vaadin-input-field-autofill-background`, `--vaadin-input-field-autofill-color` (§11.3) |
+
+Only these are genuinely new, and only these get `--vaadin-code-field-*` names:
+
+`--vaadin-code-field-cell-width` · `--vaadin-code-field-cell-gap` ·
+`--vaadin-code-field-cell-radius` · `--vaadin-code-field-cell-active-border-width` ·
+`--vaadin-code-field-caret-width` · `--vaadin-code-field-caret-color` ·
+`--vaadin-code-field-separator-color`
+
+**Radius — resolved.** There is genuinely no `--vaadin-input-field-border-radius`. But the
+platform has a house pattern for exactly this, visible in `checkable-base-styles.js`:
+
+```css
+border-radius: var(--vaadin-<component>-border-radius, var(--vaadin-radius-s));
+```
+
+a component-scoped token falling back to the **global radius scale**. So use
+`var(--vaadin-code-field-cell-radius, var(--vaadin-radius-s))`. The theme difference the
+mockup shows (Aura 9px, Lumo 8px) then comes from `--vaadin-radius-s`, which each theme sets
+— again, no forking.
+
+### 9.1.1 Per-state cell treatment
+
+Derived where the platform provides a source; the mockup supplies the intended look.
+
+| State | Cell treatment |
+|---|---|
+| Rest | Fill from `--vaadin-input-field-background`; outline from `--vaadin-input-field-border-width`/`-color` |
+| Active | Outline width doubled — the text field's own focus shift. Fill unchanged. Plus the caret |
+| Filled | No treatment of its own; the character is the signal. `filled` exists for themes, not for us |
+| Invalid | Outline recoloured to `--vaadin-input-field-error-color`, **on every cell**, filled or not |
+| Disabled | `--vaadin-input-field-disabled-background`, muted text, `--vaadin-disabled-cursor` |
+| Read-only | Transparent fill, no shadow, `var(--vaadin-input-field-readonly-border, …)` |
+
+**Read-only is derived, not invented — verified in source.** `field-base` sets only
+`cursor: default` for `:host([readonly])`, so the visible treatment comes from the themes, and
+both have one:
+
+```css
+/* @vaadin/vaadin-lumo-styles/src/components/input-container.css:123 (confirmed at 25.2.11) */
+:host([readonly])::after {
+  background-color: transparent;
+  border: var(--vaadin-input-field-readonly-border, 1px dashed var(--lumo-contrast-30pct));
+}
+```
+
+Aura takes the same shape by a different route — `[readonly]::part(input-field)` zeroes its
+surface opacity and the resting box-shadow is scoped to `:not([readonly], [disabled])`.
+
+So the mockup's dashed read-only border is **the platform convention, not a design
+invention**, and `--vaadin-input-field-readonly-border` is a real token that carries the
+Lumo/Aura difference for free. Apply it to `part="cell"` and the treatment derives like
+everything else in §9.1.
+
+`[data-application-theme='aura']` rules via `ThemeDetectionMixin` remain available but are a
+**last resort**: every such rule is a place where the two themes have forked, which is what
+this section forbids.
+
+**Zero such rules is the target, not a prediction.** Aura and Lumo do not always express the
+same treatment the same way — read-only is transparent-plus-dashed-border in Lumo but a
+zeroed surface opacity in Aura, reached through `::part(input-field)` rather than a shared
+token. Where the two genuinely diverge in *mechanism* rather than in value, a scoped rule is
+the honest answer and pretending otherwise produces a stylesheet that quietly looks wrong in
+one theme. `W-8` should record each one it adds, with the reason.
+
+### 9.2 Visual direction — [`docs/design/code-field-mockup.html`](./docs/design/code-field-mockup.html)
+
+A design exploration (built with Claude Design) fixing the intended look and feel. It is
+**directional, not a specification**: it is an artefact to check the written spec against,
+and the spec wins where they differ.
+
+What it contributes: the three-way focus-treatment comparison and the separator options
+above; and concrete starting geometry — **Aura** 44×48px cells, 6px gap, 9px radius, 20px
+type; **Lumo** 40×40px, 8px gap, 8px radius, 18px type. Those numbers are a sanity check on
+the derivation in §9.1, not values to hard-code: if deriving from
+`--vaadin-field-baseline-input-height` lands far from them, something is wrong in the
+derivation.
+
+**It was built against the v1 spec and disagrees with v2 in five places. None are adopted:**
+
+| Mockup | This spec | Why the spec wins |
+|---|---|---|
+| `<vaadin-code-field>` | `dc-code-field` | §1.1 — registering `vaadin-*` from outside the Vaadin org guarantees a registry collision |
+| "slot", `part="slot"` | **cell**, `part="cell"` | v2 removed `part="slot"` as an internal contradiction; "slot" also collides with the `<slot>` this component genuinely uses for its input |
+| "ships no visual opinion" | We ship base styles | `P0-2`; the Vaadin 24 model |
+| `maxlength` on the input | No `maxlength` | §7.8.4 — truncation belongs in the pipeline |
+| §6.1 / §7.7 / §12.5 refs | v2 numbering | Grouping is §6.4/§11.10; caret widening is §7.8.1 |
 
 ---
 
@@ -688,6 +831,20 @@ grouped cells.
 - Desktop: invisible, since §11.2 hides selection painting.
 - iOS: §11.5's accepted artefact gets meaningfully worse whenever `groups` is set.
 
+**The cost is the separator's *width*, not its glyph — and this invalidates the obvious
+fallback.** `separator=""` (§9) renders an element of the *same width* with no character in
+it, so it misaligns native selection exactly as much as a glyph does. Gap-only grouping is
+**not** an iOS mitigation, and neither is a gap implemented as cell margin.
+
+The only things that actually reduce the cost are:
+
+1. **No grouping** — `groups` unset. The one genuine mitigation.
+2. **A narrower separator**, which reduces the misalignment proportionally without removing
+   it. Palliative, not a fix.
+
+So if `V11-1.4`'s grouped-iOS row comes back bad, the fallback is **not shipping `groups` at
+all**, not shipping it gap-only. That is a scope decision, and it must be taken as one.
+
 This is a structural cost of grouping, not a bug to fix, and it is an argument for keeping
 `groups` in v1.1 (§12) and for adding a **grouped case to the iOS row** of §14.3 before v1.1
 commits.
@@ -742,8 +899,10 @@ have a row for.
 | Input element | Out of flow — observer cycle **and** badge overhang (§7.9.4) |
 | RTL | Cells always LTR, enforced; chrome mirrors; **in the v1 test matrix** (§7.9.6) |
 | `groups` | `groups="3 3"` / `setGroups(int...)` + `getGroups()`; **v1.1** |
-| Separator | Rendered glyph; v1.1; documented iOS geometry cost (§11.10) |
-| Active cell | Accent border + synthetic caret; field ring retained (§9) |
+| Separator | Rendered glyph; v1.1; documented iOS geometry cost (§11.10). **`separator=""` is gap-only**, free and cosmetic — explicitly **not** an iOS mitigation, since the cost is the separator's width (§9, §11.10) |
+| Active cell | Accent border **primary**, synthetic caret **secondary**; field ring retained. Framed as the text field's own 1px→2px focus shift, not a new treatment (§9) |
+| Cell tokens | **Derive** from `--vaadin-field-baseline-input-height` / `--vaadin-input-field-*`; invent `--vaadin-code-field-*` only for gap, radius, active border width and caret. Theme difference falls out of tokens, with **no** theme-specific CSS (§9.1) |
+| Visual direction | `code-field-mockup.html` is directional only; it predates v2 and disagrees in five places, none adopted (§9.2) |
 | Clear button | Dropped both platforms; `clear()` remains, no affordance (§6.1) |
 | `small` variant | Ships in v1, cell sizing only, visual-tested on a subset (§14.2) |
 | `autoSubmit` | Cut from v1 both platforms; documented `code-complete` pattern (§6.1) |
