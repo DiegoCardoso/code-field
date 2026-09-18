@@ -66,4 +66,37 @@ describe('hiding the input text', () => {
     expect(transparent(computed.color), 'page CSS overrode color').to.be.true;
     expect(transparent(computed.webkitTextFillColor), 'page CSS overrode -webkit-text-fill-color').to.be.true;
   });
+
+  describe('the native selection band', () => {
+    // §11.2 needs *two* declarations: transparent text alone still leaves the
+    // browser painting its highlight behind the selected character, which shows
+    // through the cell as a coloured band.
+    //
+    // It cannot live in the shadow stylesheet: `::slotted(input)::selection` is
+    // not a valid selector and is dropped silently. Vaadin hits the same wall
+    // with ::placeholder and solves it with SlotStylesMixin, which injects rules
+    // into the light-DOM scope where `input::selection` works normally.
+    const injectedRules = () =>
+      [...document.querySelectorAll('style')]
+        .map((style) => style.textContent)
+        .filter((text) => text.includes('dc-code-field'))
+        .join('\n');
+
+    it('should inject a ::selection rule into the light-DOM scope', () => {
+      expect(injectedRules()).to.contain('::selection');
+    });
+
+    it('should make both the band and the selected text transparent', () => {
+      const rules = injectedRules();
+      const selection = rules.slice(rules.indexOf('::selection'));
+      expect(selection, 'background').to.contain('background');
+      expect(selection, 'color').to.contain('color');
+    });
+
+    it('should keep the base autofill overrides', () => {
+      // §11.3 rides on the same mechanism, and the base provides it — so
+      // overriding slotStyles without calling super would silently drop it.
+      expect(injectedRules()).to.contain(':autofill');
+    });
+  });
 });
