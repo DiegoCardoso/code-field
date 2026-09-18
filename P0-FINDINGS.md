@@ -182,12 +182,40 @@ Three corrections for SPEC §13:
 `HasAllowedCharPattern` is all-default and merely mirrors the `allowedCharPattern` element
 property — the web component still owns the actual filtering.
 
+### `<vaadin-input-container>` tolerance: **RESOLVED** — measured in Chrome during `W-2`
+
+It tolerates both, but **not by default** — two conditions were found by measuring, neither
+visible from reading the sources:
+
+1. **`[part='input-field']` must be `position: relative`.** Without a positioned ancestor,
+   the absolutely-positioned input resolves `inset: 0` against the *initial containing block*
+   and covers the entire page. Measured at 1120×1267 at (0,0) before the fix.
+2. **Something in flow must supply the height.** With the input out of flow and the cells
+   layer empty, the container collapses to its padding — 14px, against a text field's 32px.
+   The cells layer is that something; until `W-5` renders real cells it carries a
+   `min-height`.
+
+With both in place, measured against `<vaadin-text-field>` on the same dev page:
+
+| | `dc-code-field` | `vaadin-text-field` |
+|---|---|---|
+| Field | 192×80 | 192×80 |
+| Input container | 192×32 | 192×32 |
+
+Delta **0** on both. `document.elementFromPoint` at the container's centre and near its edge
+returns **the input**, not the cells layer — so `pointer-events: none` keeps click-to-position
+reaching the real input, which is what SPEC §5 requires.
+
+A third finding, not part of the original question: the field must include
+**`inputFieldShared`** from `@vaadin/field-base/src/styles/input-field-shared-styles.js`
+(SPEC §4.1 already lists it). Without it the label and helper typography drift from every
+other Vaadin field — invisible alone, obvious side by side, which is exactly why SPEC §14.1
+asks for that comparison.
+
 ### Still open in `P0-3`
 
-- `<vaadin-input-container>` tolerance for a sibling decorative layer plus an
-  absolutely-positioned slotted input — needs the throwaway prototype, not source reading.
-- The canary test itself (`P0-3.6`), which should now assert the eight hooks in the table
-  above.
+- The canary test itself (`P0-3.6`). **Done in `W-1`** — asserts all nine hooks by name and
+  arity, plus that the base still gates a whole mixed paste payload.
 
 ---
 
