@@ -213,6 +213,29 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
     `;
   }
 
+  /**
+   * SPEC §6.1 drops the clear button on both platforms: `clear()` remains, but no
+   * affordance is rendered.
+   *
+   * `ClearButtonMixin` arrives regardless, because `allowedCharPattern` is
+   * declared in `InputControlMixin`, which composes `ClearButtonMixin` directly —
+   * the two cannot be separated by composition, and §4.1 deliberately reuses that
+   * per-character rejection. (`vaadin-slider` avoids the mixin entirely by
+   * extending `FieldMixin`, which is not open to us for that reason.)
+   *
+   * `null` is a documented return value of this getter, and the base's only
+   * consumer is `if (this.clearElement)`. So this is the honest answer to "what
+   * is your clear element?" rather than a workaround — and it stops one warning
+   * per instance reaching every consuming application's console.
+   *
+   * @protected
+   * @override
+   * @return {null}
+   */
+  get clearElement() {
+    return null;
+  }
+
   /** @protected */
   connectedCallback() {
     super.connectedCallback();
