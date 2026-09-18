@@ -26,6 +26,10 @@ describe('selection engine', () => {
 
   const selection = () => [input.selectionStart, input.selectionEnd];
 
+  // CI runs on Linux, development happens on macOS, and the cut shortcut differs.
+  // Hard-coding either one passes locally and fails in CI, or the reverse.
+  const CUT = /Mac|iPhone|iPad/u.test(navigator.platform) ? 'Meta+x' : 'Control+x';
+
   describe('focus placement', () => {
     it('should put the caret at index 0 when empty', async () => {
       await setUp('');
@@ -152,6 +156,60 @@ describe('selection engine', () => {
       await settle();
 
       expect(selection()).to.eql([0, 1]);
+    });
+  });
+
+  describe('selection after deletion', () => {
+    const settle = async () => {
+      await nextFrame();
+      await nextFrame();
+    };
+
+    it('should re-widen the caret after a deletion', async () => {
+      // §7.8.1.4 claimed no browser fires `selectionchange` on deletion and that
+      // a manual dispatch was needed. Both Chromium and Firefox do fire it, so
+      // none is implemented — but the re-widening still has to happen, and
+      // removing the listener makes this test fail, which is what pins it.
+      await setUp('123456');
+      field.focus();
+      input.setSelectionRange(2, 3, 'forward');
+      await settle();
+
+      await sendKeys({ press: 'Backspace' });
+      await settle();
+
+      expect(input.value).to.equal('12456');
+      expect(selection()).to.eql([2, 3]);
+    });
+
+    it('should re-widen the caret after a deletion at the end', async () => {
+      await setUp('123456');
+      field.focus();
+      await settle();
+      expect(selection(), 'precondition: clamped to the last cell').to.eql([5, 6]);
+
+      await sendKeys({ press: 'Backspace' });
+      await settle();
+
+      expect(input.value).to.equal('12345');
+      // Now partially filled, so the caret belongs at the append position.
+      expect(selection()).to.eql([5, 5]);
+    });
+
+    it('should re-widen the caret after a cut', async () => {
+      // The other half of §7.8.1.4's claim. Deletion turned out to fire
+      // `selectionchange` in both browsers; cut is tested separately because the
+      // spec lumps them together and they need not behave the same.
+      await setUp('123456');
+      field.focus();
+      input.setSelectionRange(2, 3, 'forward');
+      await settle();
+
+      await sendKeys({ press: CUT });
+      await settle();
+
+      expect(input.value, 'cut did not reach the input').to.equal('12456');
+      expect(selection()).to.eql([2, 3]);
     });
   });
 });
