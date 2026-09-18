@@ -47,6 +47,19 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
   /** Guards the re-entrant write in __normaliseValue. */
   #normalising = false;
 
+  /** The single ResizeObserver (§11.4, §7.9.4). */
+  #resizeObserver = null;
+
+  /** Cached digit advance, keyed by the font it was measured for. */
+  #advanceCache = { font: null, advance: 0 };
+
+  /**
+   * True when focus arrived from a pointer. §7.3 places the caret by native hit
+   * testing on a click, so focus placement must not overrule where the user
+   * actually clicked.
+   */
+  #focusFromPointer = false;
+
   /**
    * True while a value change originates from the user rather than from an
    * assignment. §6.5.2's warning is about invisible data loss through a
@@ -347,12 +360,111 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
     // `selectionchange` only fires on `document`, so the listener cannot live on
     // the input and has to be added and removed with the element.
     document.addEventListener('selectionchange', this.#onSelectionChange);
+    this.addEventListener('pointerdown', this.#onPointerDown, true);
   }
 
   /** @protected */
   disconnectedCallback() {
     super.disconnectedCallback();
     document.removeEventListener('selectionchange', this.#onSelectionChange);
+    this.removeEventListener('pointerdown', this.#onPointerDown, true);
+    this.#resizeObserver?.disconnect();
+    this.#resizeObserver = null;
+  }
+
+  /**
+   * §11.4's observer, and there is exactly one. It watches the cell row and
+   * publishes metrics consumed **only by the input**, which is out of flow
+   * (§7.9.4) — so its output cannot feed back into the cells' layout and the
+   * cycle §7.9.4 warns about cannot form.
+   *
+   * This is not "JS sizing" in the sense §7.9 forbids: the cells still shrink
+   * purely in CSS. The observer only reports the width they settled on, so the
+   * input's text can follow them.
+   *
+   * @private
+   */
+  #observeCellMetrics() {
+    const cells = this.shadowRoot.querySelector('[part~="cells"]');
+    if (!cells || this.#resizeObserver) {
+      return;
+    }
+
+    this.#resizeObserver = new ResizeObserver(() => this.#publishCellMetrics());
+    this.#resizeObserver.observe(cells);
+  }
+
+  /**
+   * Publishes cell pitch, glyph advance and the offset between the input's box
+   * and the first cell. Measured rather than derived from tokens, so it stays
+   * correct whatever a theme sets for gap, padding or font.
+   *
+   * @private
+   */
+  #publishCellMetrics() {
+    const input = this.inputElement;
+    const cells = this.shadowRoot.querySelector('[part~="cells"]');
+    const first = cells?.firstElementChild;
+    if (!input || !first) {
+      return;
+    }
+
+    const firstBox = first.getBoundingClientRect();
+    const second = first.nextElementSibling;
+    // Pitch, not width + gap: it needs no knowledge of which token supplies the
+    // gap, and a single cell has no pitch to measure.
+    const pitch = second ? second.getBoundingClientRect().left - firstBox.left : firstBox.width;
+
+    // Applied inline rather than through custom properties. The input is slotted
+    // twice — into this shadow root and then into <vaadin-input-container>'s —
+    // so the container's own ::slotted(input) rules win the cascade for padding
+    // and letter-spacing. Inline styles sidestep that argument entirely.
+    //
+    // The font is copied from the cell, so the advance measured below is the
+    // advance the cells actually render with, rather than an approximation.
+    const cellFont = getComputedStyle(first).font;
+    input.style.font = cellFont;
+    input.style.fontVariantNumeric = 'tabular-nums';
+
+    const advance = this.#digitAdvance(cellFont);
+    const offset = firstBox.left - input.getBoundingClientRect().left;
+
+    input.style.letterSpacing = `${pitch - advance}px`;
+
+    // Align each character *boundary* with a cell's centre, not each glyph with
+    // a cell. A caret is a boundary, and a click resolves to the nearest one —
+    // so with glyphs centred, a click on a cell's centre lands exactly on the
+    // tie between two boundaries, which Chrome rounds down and Firefox rounds up
+    // (an off-by-one cell, in Firefox only).
+    //
+    // With boundary i at cell i's centre, every point inside cell i is nearer to
+    // boundary i than to i+1, in any engine. The glyphs shift half a cell right
+    // as a result, which does not matter: the input's text is transparent and
+    // the cells render the characters (§11.12).
+    input.style.paddingInline = `${offset + firstBox.width / 2}px 0`;
+  }
+
+  /**
+   * The rendered advance of a digit, which is **not** `1ch` — `ch` is the width
+   * of "0" without the font's own spacing, and using it left a residual error the
+   * prototype measured at ~2.5px per cell.
+   *
+   * @private
+   */
+  #digitAdvance(font) {
+    if (this.#advanceCache.font === font && this.#advanceCache.advance) {
+      return this.#advanceCache.advance;
+    }
+
+    const probe = document.createElement('span');
+    probe.textContent = '0';
+    probe.style.cssText = `position:absolute;visibility:hidden;white-space:pre;font:${font};font-variant-numeric:tabular-nums`;
+    document.body.appendChild(probe);
+    const advance = probe.getBoundingClientRect().width;
+    probe.remove();
+
+    this.#advanceCache = { font, advance };
+    return advance;
   }
 
   /**
@@ -480,13 +592,28 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
     super._setFocused(focused);
 
     if (focused) {
-      this.#placeCaretOnFocus();
+      // A click already placed the caret where the user aimed (§7.3). Clamping a
+      // full value to the last cell here would silently overrule every click.
+      if (!this.#focusFromPointer) {
+        this.#placeCaretOnFocus();
+      }
+      this.#focusFromPointer = false;
     } else {
       // No focus, no active cell: §9 requires the active-cell treatment to mean
       // "this is where typing goes", which is untrue when nothing is focused.
       this._activeCell = -1;
     }
   }
+
+  /** @private */
+  #onPointerDown = () => {
+    this.#focusFromPointer = true;
+    // Cleared on a later task in case the pointer never produces focus at all —
+    // a drag that ends outside the field, for instance.
+    setTimeout(() => {
+      this.#focusFromPointer = false;
+    });
+  };
 
   /** @private */
   #placeCaretOnFocus() {
@@ -853,6 +980,8 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
 
     // Without this a slotted <vaadin-tooltip> has no target and never settles,
     // which wedges Lit's update queue rather than failing — diagnosed in #4.
+    this.#observeCellMetrics();
+
     this._tooltipController = new TooltipController(this);
     this._tooltipController.setPosition('top');
     this._tooltipController.setAriaTarget(this.inputElement);

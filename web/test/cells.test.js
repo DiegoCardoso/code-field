@@ -5,6 +5,7 @@
  */
 import { expect } from 'chai';
 import { fixtureSync, nextFrame, nextRender } from '@vaadin/testing-helpers';
+import { sendMouse } from '@web/test-runner-commands';
 
 import '../src/code-field.js';
 
@@ -78,5 +79,37 @@ describe('cells', () => {
     field.value = '123456';
     await nextRender();
     expect(cells().some((cell) => cell.hasAttribute('active'))).to.be.false;
+  });
+
+  describe('click to position', () => {
+    // §7.3: the caret is placed by *native hit testing*, not click handlers. The
+    // decorative layer is pointer-events: none and the input sits over it, so the
+    // browser resolves the position itself — which only works when each glyph
+    // sits over its cell.
+    const clickCell = async (index) => {
+      const box = cells()[index].getBoundingClientRect();
+      await sendMouse({
+        type: 'click',
+        position: [Math.round(box.x + box.width / 2), Math.round(box.y + box.height / 2)],
+      });
+      await nextFrame();
+      await nextFrame();
+      await nextRender();
+    };
+
+    beforeEach(async () => {
+      field.value = '123456';
+      await nextRender();
+      // The observer publishes metrics a frame after layout settles.
+      await nextFrame();
+      await nextFrame();
+    });
+
+    for (const index of [0, 1, 2, 3, 4, 5]) {
+      it(`should place the caret on cell ${index}`, async () => {
+        await clickCell(index);
+        expect(field._activeCell, `clicking cell ${index} activated ${field._activeCell}`).to.equal(index);
+      });
+    }
   });
 });
