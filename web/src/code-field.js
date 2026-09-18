@@ -406,6 +406,34 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
   }
 
   /**
+   * §11.7: browsers restore form state *before* custom elements upgrade, so a
+   * slotted input can already hold a value when the component wakes up. Adopt it
+   * rather than clobbering it — otherwise a back button silently empties the
+   * field.
+   *
+   * It is adopted *through the sanitiser*, because restored state is no more
+   * trustworthy than any other input.
+   *
+   * No warning: the developer did not assign this, the browser did, and §6.5.2's
+   * warning exists to catch developer mistakes. The cost is that a hand-written
+   * `<input slot="input" value="12-34">` is also adjusted silently.
+   *
+   * @private
+   */
+  #adoptRestoredValue(restored) {
+    if (!restored || this.value) {
+      return;
+    }
+
+    this.#fromUser = true;
+    try {
+      this.value = restored;
+    } finally {
+      this.#fromUser = false;
+    }
+  }
+
+  /**
    * §7.8.3: rewrite **only the offending range** with `setRangeText`, never a
    * whole-value assignment, and restore the selection.
    *
@@ -643,6 +671,12 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
 
     this.addController(
       new InputController(this, (input) => {
+        // §11.7: read this *before* _setInputElement, which propagates the host's
+        // (empty) value onto the input and wipes whatever was restored. The
+        // property covers browser form restoration; the attribute covers a value
+        // written into the markup.
+        const restored = input.value || input.getAttribute('value') || '';
+
         this._setInputElement(input);
         this._setFocusElement(input);
         this.stateTarget = input;
@@ -652,6 +686,8 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
         // wanted in a code. `autocorrect` is delegated by InputFieldMixin;
         // `spellcheck` is not, so it is set here.
         input.setAttribute('spellcheck', 'false');
+
+        this.#adoptRestoredValue(restored);
       }),
     );
     this.addController(new LabelledInputController(this.inputElement, this._labelController));

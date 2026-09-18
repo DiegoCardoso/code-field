@@ -316,4 +316,43 @@ describe('input pipeline', () => {
       expect(field.value, 'undo did nothing — something rewrote the value').to.not.equal('123');
     });
   });
+
+  describe('value restored before upgrade', () => {
+    // §11.7: browsers restore form state *before* custom elements upgrade, so a
+    // slotted input can already hold a value when the component wakes up.
+    // Clobbering it loses whatever the browser just restored — a back button
+    // then silently empties the field.
+    const upgradeWith = async (markup) => {
+      const restored = fixtureSync(`<dc-code-field allowed-char-pattern="[0-9]">${markup}</dc-code-field>`);
+      await nextRender();
+      return restored;
+    };
+
+    it('should adopt a value already present on the slotted input', async () => {
+      const restored = await upgradeWith('<input slot="input" value="123456">');
+      expect(restored.value).to.equal('123456');
+    });
+
+    it('should adopt it through the sanitiser', async () => {
+      // Restored state is not trusted input: it goes through the same one
+      // sanitiser as everything else (§6.5.1).
+      const restored = await upgradeWith('<input slot="input" value="12-34">');
+      expect(restored.value).to.equal('1234');
+    });
+
+    it('should truncate a restored value that is too long', async () => {
+      const restored = await upgradeWith('<input slot="input" value="12345678">');
+      expect(restored.value).to.equal('123456');
+    });
+
+    it('should derive complete from the restored value', async () => {
+      const restored = await upgradeWith('<input slot="input" value="123456">');
+      expect(restored.complete).to.be.true;
+    });
+
+    it('should leave the field empty when nothing was restored', async () => {
+      const restored = await upgradeWith('');
+      expect(restored.value).to.equal('');
+    });
+  });
 });
