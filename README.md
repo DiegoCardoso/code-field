@@ -4,9 +4,13 @@ A single-value field for entering short fixed-length codes — one-time password
 codes, email verification codes, PINs, redeem and license keys — rendered as a row of
 per-character cells, for **Vaadin 25**.
 
-> **Status: pre-implementation.** The specification is decision-locked and Phase 0 is
-> essentially closed, but the component itself is a scaffold. Nothing is published yet.
-> See [PLAN.md](./PLAN.md) for what lands when.
+> **Status: in progress, unpublished.** The web component types, selects, pastes, deletes and
+> renders its cells; clicking a cell places the caret by native hit testing. Validation and
+> events (`W-7`), the theme stylesheet (`W-8`) and the whole Flow module are still to come,
+> and nothing is published to npm or Maven.
+>
+> [PLAN.md](./PLAN.md) opens with the current state of every task, the open issues, and the
+> spec claims that measurement disproved. Read that first.
 
 ## What makes it different
 
