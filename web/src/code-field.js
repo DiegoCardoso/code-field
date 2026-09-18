@@ -270,6 +270,61 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
   };
 
   /**
+   * SPEC §7.3: Home and End jump to the first and last cell.
+   *
+   * Implemented rather than left to the browser because Firefox on macOS does
+   * not act on Home/End inside an input at all — the caret simply stays put.
+   * Chromium does. Specifying the behaviour means owning it.
+   *
+   * @param {KeyboardEvent} event
+   * @protected
+   * @override
+   */
+  _onKeyDown(event) {
+    super._onKeyDown(event);
+
+    if (this.disabled) {
+      return;
+    }
+
+    // §7.8.5: readonly keeps navigation and copy working — it only suppresses the
+    // active-cell highlight. Blocking the key outright would leave Firefox, which
+    // does not act on Home/End natively, with no way to move the caret at all.
+    if (event.key === 'Home') {
+      event.preventDefault();
+      this.#moveCaretTo(0);
+    } else if (event.key === 'End') {
+      const value = this.inputElement.value || '';
+      event.preventDefault();
+      this.#moveCaretTo(Math.min(value.length, this.length));
+    }
+  }
+
+  /**
+   * Places the caret at `position`, widening it onto a cell unless the field is
+   * readonly — where nothing can be typed, so highlighting a target cell would
+   * claim something untrue (§7.8.5).
+   *
+   * @private
+   */
+  #moveCaretTo(position) {
+    if (this.readonly) {
+      this.#select(position, position, 'none');
+      return;
+    }
+
+    if (position >= this.length) {
+      this.#select(this.length - 1, this.length, 'forward');
+    } else if (position === (this.inputElement.value || '').length) {
+      // The append position: a collapsed caret here is what makes the next
+      // keystroke append rather than overwrite (§7.8.1.2).
+      this.#select(position, position, 'none');
+    } else {
+      this.#select(position, position + 1, 'forward');
+    }
+  }
+
+  /**
    * SPEC §7.3. Placement is set explicitly for every case rather than left to the
    * browser: the default differs between engines, and Firefox is in the test
    * matrix for exactly that reason.
