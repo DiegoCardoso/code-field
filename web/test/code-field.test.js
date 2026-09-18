@@ -17,6 +17,34 @@ describe('code-field', () => {
     await nextRender();
   });
 
+  it('should not warn about a clear button it deliberately does not have', async () => {
+    // SPEC §6.1 drops the clear button on both platforms: `clear()` remains, no
+    // affordance is rendered. ClearButtonMixin arrives anyway, because
+    // `allowedCharPattern` lives in the same mixin (InputControlMixin composes
+    // ClearButtonMixin directly), and §4.1 deliberately reuses that rejection.
+    //
+    // Without this, every instance logs one line into every consuming
+    // application's console — a six-field form logs it six times.
+    const warn = sinon.stub(console, 'warn');
+    fixtureSync('<dc-code-field></dc-code-field>');
+    await nextRender();
+    const messages = warn.getCalls().map((call) => String(call.args[0]));
+    warn.restore();
+
+    expect(messages.filter((message) => message.includes('clearElement'))).to.eql([]);
+  });
+
+  it('should still clear programmatically', async () => {
+    // §6.1: the affordance is dropped, `clear()` is not. Returning null from
+    // clearElement must not take the method with it.
+    field.value = '123456';
+    field.clear();
+    await nextRender();
+
+    expect(field.value).to.equal('');
+    expect(field.querySelector('input').value).to.equal('');
+  });
+
   describe('input element', () => {
     it('should render a real input in the light DOM', () => {
       // SPEC §4: the input is light DOM and slotted, which is *why* password
