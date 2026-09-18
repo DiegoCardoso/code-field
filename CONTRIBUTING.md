@@ -63,6 +63,37 @@ exists — an iPhone and desktop Chrome with 1Password. Rows that cannot be run 
 `UNTESTED` there and repeated in the README rather than carried as aspiration. **Android
 composition is untested**, and that is the accepted risk of v1.
 
+## Commits and PR titles
+
+**Conventional Commits**, and the same for pull request titles — PRs are squashed or
+merged as a unit, so a non-semantic PR title lands in history regardless of how clean the
+commits were.
+
+```
+<type>(<scope>): <subject>
+```
+
+| Type       | For                                              |
+| ---------- | ------------------------------------------------ |
+| `feat`     | New component behaviour or public API            |
+| `fix`      | A defect in shipped behaviour                    |
+| `docs`     | SPEC, PLAN, ADRs, README, CONTRIBUTING, findings |
+| `test`     | Tests only, including the canary                 |
+| `ci`       | Workflows and CI configuration                   |
+| `build`    | Toolchain, dependencies, packaging               |
+| `refactor` | No behaviour change                              |
+| `chore`    | Anything else                                    |
+
+Scopes: `web`, `flow`, `spec`, `deps`. Omit when a change is genuinely repo-wide.
+
+Subject in the imperative mood, no trailing full stop, and not Sentence-, Start- or
+UPPER-cased. Identifiers keep their own casing — `(W-2)`, `P0-3`, `ValidationController`. The body is where the
+reasoning goes — especially _why_, and what was rejected. Reference task IDs (`W-2`,
+`P0-3`) so a commit can be traced back to the plan.
+
+A breaking change is `!` after the type/scope plus a `BREAKING CHANGE:` footer. Before
+`1.0.0` this is documentation, not a version contract — the posture is 0.x, best-effort.
+
 ## Conventions
 
 - Element prefix `dc-`; shadow parts unprefixed (`cell`, `separator`).

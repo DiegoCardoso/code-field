@@ -18,3 +18,10 @@ The five canonical roles, unchanged (`needs-triage`, `needs-info`, `ready-for-ag
 ### Domain docs
 
 Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+## Commits
+
+Conventional Commits, and the same format for PR titles:
+`<type>(<scope>): <subject>`, types `feat|fix|docs|test|ci|build|refactor|chore`,
+scopes `web|flow|spec|deps`. Put the reasoning — and what was rejected — in the body, and
+reference task IDs from PLAN.md. See `CONTRIBUTING.md`.
