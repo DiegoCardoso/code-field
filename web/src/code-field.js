@@ -44,8 +44,16 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
   /** Guards the re-entrant write in __lengthChanged. */
   #revertingLength = false;
 
-  /** Guards the re-entrant write in __enforceLength. */
-  #truncating = false;
+  /** Guards the re-entrant write in __normaliseValue. */
+  #normalising = false;
+
+  /**
+   * True while a value change originates from the user rather than from an
+   * assignment. §6.5.2's warning is about invisible data loss through a
+   * Binder-bound bean; a user holding a key is not that, and warning once per
+   * keystroke would make the console useless.
+   */
+  #fromUser = false;
 
   static get properties() {
     return {
@@ -121,7 +129,7 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
     return [
       '__updateAutocomplete(oneTimeCode)',
       '__lengthChanged(length)',
-      '__enforceLength(value, length)',
+      '__normaliseValue(value, length)',
       '__updateComplete(value, length)',
     ];
   }
@@ -375,26 +383,181 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
     this.#previousRange = [start, end];
   }
 
-  /** @private */
-  __enforceLength(value, length) {
-    if (this.#truncating) {
+  /**
+   * SPEC §4.1: **wrapped** — `super` performs the value commit, so the origin
+   * flag has to be set around it. `value` is `sync`, so the observer runs inside
+   * this call and sees the flag.
+   *
+   * @param {Event} event
+   * @protected
+   * @override
+   */
+  _onInput(event) {
+    this.#fromUser = true;
+    try {
+      super._onInput(event);
+    } finally {
+      this.#fromUser = false;
+    }
+
+    this.#clampCaretWhenFull();
+  }
+
+  /**
+   * §7.1: "Typing when the value is full and the last cell is active replaces the
+   * last character."
+   *
+   * When the field has just filled, the caret sits one past the last cell. Chrome
+   * leaves it there, so the next keystroke appends and is then truncated away —
+   * the field silently ignores typing. Firefox happens to land on the last cell
+   * and behaves correctly, which is how this was caught.
+   *
+   * @private
+   */
+  #clampCaretWhenFull() {
+    const input = this.inputElement;
+    if (!input || this.readonly || this.disabled) {
       return;
     }
 
-    const current = value || '';
-    if (current.length <= length) {
+    if ((input.value || '').length < this.length) {
       return;
     }
 
-    // SPEC §6.5.2: warn, naming the input and the result. A silently truncated
-    // value bound through a Binder is data loss with no symptom; a warned one is
-    // a bug the developer can actually find.
-    const truncated = current.slice(0, length);
-    console.warn(`<dc-code-field> value "${current}" exceeds length ${length}; truncated to "${truncated}".`);
+    // Leave a real range alone; this is only about a caret past the end.
+    if (input.selectionStart !== input.selectionEnd || input.selectionStart < this.length) {
+      return;
+    }
 
-    this.#truncating = true;
-    this.value = truncated;
-    this.#truncating = false;
+    this.#select(this.length - 1, this.length, 'forward');
+  }
+
+  /**
+   * SPEC §4.1: **replaced, not wrapped.** The base gates the entire clipboard
+   * payload against `allowedCharPattern`, so pasting `123-456` into a digits-only
+   * field yields nothing at all — the failure §7.4 forbids. Calling `super` here
+   * would reinstate it.
+   *
+   * @param {ClipboardEvent} event
+   * @protected
+   * @override
+   */
+  _onPaste(event) {
+    this.#insertFromTransfer(event, event.clipboardData);
+  }
+
+  /**
+   * SPEC §4.1: replaced for the same reason as `_onPaste`. Not covered by tests —
+   * driving a real drop is not available in this harness — but leaving it to the
+   * base would reintroduce all-or-nothing rejection on the drop path.
+   *
+   * @param {DragEvent} event
+   * @protected
+   * @override
+   */
+  _onDrop(event) {
+    this.#insertFromTransfer(event, event.dataTransfer);
+  }
+
+  /**
+   * Sanitise, splice at the caret or over the selection, truncate. Uses
+   * `setRangeText` rather than assigning `input.value`, so the native undo stack
+   * survives (§7.8.2).
+   *
+   * @private
+   */
+  #insertFromTransfer(event, transfer) {
+    if (this.readonly || this.disabled || !transfer) {
+      return;
+    }
+
+    // Always prevent: whatever is inserted is inserted by us, sanitised.
+    event.preventDefault();
+
+    const sanitised = this.#sanitise(transfer.getData('text'));
+    if (!sanitised) {
+      return;
+    }
+
+    const input = this.inputElement;
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? start;
+
+    input.setRangeText(sanitised, start, end, 'end');
+
+    if (input.value.length > this.length) {
+      // Trim the overflow with setRangeText too, rather than assigning the whole
+      // value — §7.8.3 forbids whole-value assignment in an editing path.
+      input.setRangeText('', this.length, input.value.length, 'end');
+    }
+
+    this.#fromUser = true;
+    try {
+      this.value = input.value;
+    } finally {
+      this.#fromUser = false;
+    }
+  }
+
+  /**
+   * The one sanitiser (SPEC §6.5.1). Every path that can put characters into the
+   * field — assignment, `beforeinput`, composition, paste — calls this, so the
+   * same input yields the same value however it arrives. A second copy anywhere
+   * is the bug §6.5 exists to prevent.
+   *
+   * @param {string} value
+   * @return {string}
+   * @private
+   */
+  #sanitise(value) {
+    const raw = value == null ? '' : String(value);
+    const allowed = this.allowedCharPattern ? new RegExp(`^${this.allowedCharPattern}$`, 'u') : null;
+
+    let result = '';
+    for (const character of raw) {
+      // Whitespace is always stripped, pattern or not: a code copied out of an
+      // email arrives with spaces around it and should still paste cleanly.
+      if (/\s/u.test(character)) {
+        continue;
+      }
+      if (allowed && !allowed.test(character)) {
+        continue;
+      }
+      result += character;
+    }
+
+    return result;
+  }
+
+  /**
+   * Sanitise, then truncate — in that order. §7.8.4: `123-456` is seven
+   * characters, so truncating first clips it to `123-45` and strips to `12345`,
+   * one digit short of the code the user actually pasted.
+   *
+   * @private
+   */
+  __normaliseValue(value, length) {
+    if (this.#normalising) {
+      return;
+    }
+
+    const current = value == null ? '' : String(value);
+    const effective = this.#sanitise(current).slice(0, length);
+
+    if (effective === current) {
+      return;
+    }
+
+    if (!this.#fromUser) {
+      // §6.5.2: name the input and the result. Silent adjustment through a
+      // Binder-bound bean is data loss with no symptom — but the same adjustment
+      // during typing is just the field working.
+      console.warn(`<dc-code-field> value "${current}" was adjusted to "${effective}" (length ${length}).`);
+    }
+
+    this.#normalising = true;
+    this.value = effective;
+    this.#normalising = false;
   }
 
   /** @private */
