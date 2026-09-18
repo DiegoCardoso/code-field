@@ -13,6 +13,7 @@ export default [
       ecmaVersion: 2023,
       sourceType: 'module',
       globals: {
+        console: 'readonly',
         customElements: 'readonly',
         document: 'readonly',
         window: 'readonly',

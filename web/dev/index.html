@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>dc-code-field — dev page</title>
     <script type="module" src="../src/code-field.js"></script>
+    <script type="module" src="../../node_modules/@vaadin/text-field/vaadin-text-field.js"></script>
     <style>
       body {
         font-family: system-ui, sans-serif;
@@ -69,7 +70,13 @@
     </p>
 
     <h2>Live field</h2>
-    <dc-code-field id="field"></dc-code-field>
+    <dc-code-field id="field" label="Verification code" helper-text="Enter the 6-digit code"></dc-code-field>
+
+    <h2>Side by side with a text field (SPEC &sect;14.1)</h2>
+    <div style="display: flex; gap: 24px; align-items: flex-start">
+      <dc-code-field label="Verification code" helper-text="Enter the 6-digit code"></dc-code-field>
+      <vaadin-text-field label="Verification code" helper-text="Enter the 6-digit code"></vaadin-text-field>
+    </div>
 
     <h2>Field state</h2>
     <!-- SPEC §7.6 / §7.7: the fastest way to see the user-originated rule and the
