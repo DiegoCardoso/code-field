@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>PROTOTYPE — glyph alignment</title>
+    <style>
+      body { font: 14px system-ui; margin: 24px; }
+      h1 { font-size: 18px; }
+      .variant { margin-bottom: 28px; }
+      .field { position: relative; border: 1px solid #ccc; padding: 4px; margin: 6px 0; }
+      .cells { display: flex; gap: var(--gap); direction: ltr; flex-wrap: nowrap; }
+      .cell { display: grid; place-items: center; min-width: 24px; height: 32px;
+              border: 1px solid #999; border-radius: 4px; box-sizing: border-box;
+              font: var(--cell-font); font-variant-numeric: tabular-nums; }
+      .field input { position: absolute; inset: 4px; width: calc(100% - 8px);
+                     box-sizing: border-box; border: 0; outline: 0; background: transparent;
+                     color: rgba(255,0,0,.35); font-variant-numeric: tabular-nums; margin: 0; }
+      /* (a) fixed cell width: letter-spacing derives from the same token, pure CSS */
+      .a .cell { flex: 0 0 var(--cell-w); }
+      .a input { font: var(--cell-font); padding-left: calc(var(--cell-w) / 2 - 0.5ch);
+                 letter-spacing: calc(var(--cell-w) + var(--gap) - 1ch); }
+      /* (b) flexible cells, spacing frozen at natural size */
+      .b .cell { flex: 1 1 auto; }
+      .b input { font: var(--cell-font); padding-left: calc(var(--cell-w) / 2 - 0.5ch);
+                 letter-spacing: calc(var(--cell-w) + var(--gap) - 1ch); }
+      /* (d) as (c), but padding derived from the *measured* digit advance rather
+         than from `ch`, which is the width of "0" and not the digit advance. */
+      .d .cell { flex: 1 1 auto; }
+      .d input { font: var(--cell-font); font-variant-numeric: tabular-nums;
+                 padding-left: calc((var(--measured-w, 40px) - var(--advance, 11px)) / 2);
+                 letter-spacing: calc(var(--measured-w, 40px) + var(--gap) - var(--advance, 11px)); }
+      /* (c) flexible cells, spacing republished from a ResizeObserver */
+      .c .cell { flex: 1 1 auto; }
+      .c input { font: var(--cell-font); padding-left: calc(var(--measured-w, 40px) / 2 - 0.5ch);
+                 letter-spacing: calc(var(--measured-w, 40px) + var(--gap) - 1ch); }
+      table { border-collapse: collapse; font: 12px ui-monospace, monospace; }
+      td, th { border: 1px solid #ddd; padding: 2px 6px; text-align: right; }
+      .bad { background: #fdd; } .ok { background: #dfd; }
+    </style>
+  </head>
+  <body>
+    <h1>PROTOTYPE — glyph alignment (throwaway)</h1>
+    <p>
+      Question: can native hit testing land the caret on the clicked cell? Measures the x-centre of each
+      cell against the x-centre of the corresponding glyph in the overlaid input, at several widths.
+      Error under half a cell width means a click lands on the right cell.
+    </p>
+    <div id="out"></div>
+    <script type="module">
+      const WIDTHS = [420, 340, 280, 220];
+      const VARIANTS = ['a', 'b', 'c', 'd'];
+      const LENGTH = 6;
+      const VALUE = '123456';
+
+      const host = document.querySelector('#out');
+
+      function buildField(variant, width) {
+        const wrap = document.createElement('div');
+        wrap.className = `variant ${variant}`;
+        wrap.style.width = `${width}px`;
+        wrap.style.setProperty('--gap', '4px');
+        wrap.style.setProperty('--cell-w', '40px');
+        wrap.style.setProperty('--cell-font', '400 20px system-ui');
+
+        const field = document.createElement('div');
+        field.className = 'field';
+        const cells = document.createElement('div');
+        cells.className = 'cells';
+        for (let i = 0; i < LENGTH; i += 1) {
+          const cell = document.createElement('div');
+          cell.className = 'cell';
+          cell.textContent = VALUE[i];
+          cells.appendChild(cell);
+        }
+        const input = document.createElement('input');
+        input.value = VALUE;
+        field.append(cells, input);
+        wrap.appendChild(field);
+        host.appendChild(wrap);
+
+        if (variant === 'd') {
+          // Measure the real advance of a digit in this font, once.
+          const probe = document.createElement('span');
+          const cs = getComputedStyle(input);
+          probe.style.cssText = `position:absolute;visibility:hidden;white-space:pre;font:${cs.font};font-variant-numeric:tabular-nums`;
+          probe.textContent = '0';
+          document.body.appendChild(probe);
+          wrap.style.setProperty('--advance', `${probe.getBoundingClientRect().width}px`);
+          probe.remove();
+        }
+
+        if (variant === 'c' || variant === 'd') {
+          const ro = new ResizeObserver(() => {
+            const first = cells.firstElementChild.getBoundingClientRect();
+            wrap.style.setProperty('--measured-w', `${first.width}px`);
+          });
+          ro.observe(cells);
+        }
+        return { wrap, cells, input };
+      }
+
+      // Mirror the input's text metrics into a span so glyph positions can be measured.
+      // An <input>'s internal text nodes are not reachable, but the same font and
+      // letter-spacing produce the same advances.
+      // Measure each glyph's own box with a Range. Measuring slice(0, i) widths
+      // instead inflates every centre by half a letter-spacing, because a text
+      // run's width includes the spacing *after* its last character — which reads
+      // as a constant alignment error that is not really there.
+      function glyphCentres(input) {
+        const cs = getComputedStyle(input);
+        const span = document.createElement('span');
+        span.style.cssText = `position:absolute;visibility:hidden;white-space:pre;font:${cs.font};letter-spacing:${cs.letterSpacing};font-variant-numeric:tabular-nums`;
+        span.textContent = VALUE;
+        document.body.appendChild(span);
+
+        const node = span.firstChild;
+        const origin = input.getBoundingClientRect().left + parseFloat(cs.paddingLeft || 0);
+        const spanLeft = span.getBoundingClientRect().left;
+
+        const centres = [];
+        const range = document.createRange();
+        for (let i = 0; i < VALUE.length; i += 1) {
+          range.setStart(node, i);
+          range.setEnd(node, i + 1);
+          const rect = range.getBoundingClientRect();
+          // The rect includes trailing letter-spacing, so use the left edge plus
+          // half the glyph's own advance.
+          range.setStart(node, i);
+          range.setEnd(node, i + 1);
+          const glyphLeft = rect.left - spanLeft;
+          const probe = document.createElement('span');
+          probe.style.cssText = `position:absolute;visibility:hidden;white-space:pre;font:${cs.font};font-variant-numeric:tabular-nums`;
+          probe.textContent = VALUE[i];
+          document.body.appendChild(probe);
+          const advance = probe.getBoundingClientRect().width;
+          probe.remove();
+          centres.push(origin + glyphLeft + advance / 2);
+        }
+        span.remove();
+        return centres;
+      }
+
+      window.measure = async () => {
+        host.textContent = '';
+        const rows = [];
+        for (const variant of VARIANTS) {
+          for (const width of WIDTHS) {
+            const { cells, input } = buildField(variant, width);
+            await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+            const cellBoxes = [...cells.children].map((c) => c.getBoundingClientRect());
+            const cellCentres = cellBoxes.map((b) => b.x + b.width / 2);
+            const centres = glyphCentres(input);
+            const halfCell = cellBoxes[0].width / 2;
+            const errors = cellCentres.map((c, i) => Math.round((centres[i] - c) * 10) / 10);
+            const worst = Math.max(...errors.map(Math.abs));
+            rows.push({
+              variant,
+              width,
+              cellWidth: Math.round(cellBoxes[0].width),
+              halfCell: Math.round(halfCell),
+              errors,
+              worst: Math.round(worst * 10) / 10,
+              landsRight: worst < halfCell,
+            });
+          }
+        }
+        return rows;
+      };
+    </script>
+  </body>
+</html>
