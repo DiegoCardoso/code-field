@@ -20,6 +20,13 @@ export default [
     },
   },
   {
+    // Config files run in Node, not the browser.
+    files: ['*.config.js', 'web/*.config.js'],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
+  {
     files: ['web/test/**/*.js'],
     languageOptions: {
       globals: globals.mocha,
