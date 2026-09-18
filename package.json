@@ -11,7 +11,6 @@
     "lint:format": "prettier --check \"web/**/*.{js,html}\" \"*.{json,md}\"",
     "format": "prettier --write \"web/**/*.{js,html}\" \"*.{json,md}\"",
     "test": "npm test --workspace web",
-    "test:visual": "./scripts/run-docker-visual-tests.sh",
     "start": "web-dev-server --node-resolve --open /web/dev"
   },
   "devDependencies": {
