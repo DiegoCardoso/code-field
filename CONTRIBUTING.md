@@ -97,6 +97,17 @@ A breaking change is `!` after the type/scope plus a `BREAKING CHANGE:` footer. 
 ## Conventions
 
 - Element prefix `dc-`; shadow parts unprefixed (`cell`, `separator`).
+- **Private members use `#`**, not the `__` prefix. Two deliberate exceptions:
+  - **Observers must be `__`.** `static get observers()` names them as _strings_, which
+    Polylit resolves off the instance at runtime — a `#` member is unreachable that way.
+    Verified: converting one makes its observer silently never run, and the failure surfaces
+    somewhere else entirely.
+  - **Protected members stay `_`**, since subclasses and `field-base` call them.
+
+  This diverges from Vaadin, which uses `__` throughout. A deliberate trade against `W-1.4`'s
+  "an upstream PR should be a rename, not a reformat": real privacy is enforced by the engine,
+  the convention is only enforced by habit.
+
 - The row of boxes is a **cell**, never a "slot" — `slot` means the `<slot>` the input sits in.
 - Never `LumoInjectionMixin` or `ThemeDetector`; both are documented internal-only. Use the
   public `ThemeDetectionMixin`, and prefer deriving from tokens over any theme-scoped rule.

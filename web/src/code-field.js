@@ -32,6 +32,21 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
     return 'dc-code-field';
   }
 
+  /** Guards the re-entrant write in #onSelectionChange. */
+  #adjustingSelection = false;
+
+  /** Last length that passed validation, restored when a bad one is rejected. */
+  #lastValidLength = 6;
+
+  /** Previous selection range, the input to ArrowLeft direction inference. */
+  #previousRange = null;
+
+  /** Guards the re-entrant write in __lengthChanged. */
+  #revertingLength = false;
+
+  /** Guards the re-entrant write in __enforceLength. */
+  #truncating = false;
+
   static get properties() {
     return {
       /**
@@ -195,13 +210,13 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
     super.connectedCallback();
     // `selectionchange` only fires on `document`, so the listener cannot live on
     // the input and has to be added and removed with the element.
-    document.addEventListener('selectionchange', this.__onSelectionChange);
+    document.addEventListener('selectionchange', this.#onSelectionChange);
   }
 
   /** @protected */
   disconnectedCallback() {
     super.disconnectedCallback();
-    document.removeEventListener('selectionchange', this.__onSelectionChange);
+    document.removeEventListener('selectionchange', this.#onSelectionChange);
   }
 
   /**
@@ -212,9 +227,9 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
    *
    * @private
    */
-  __onSelectionChange = () => {
+  #onSelectionChange = () => {
     const input = this.inputElement;
-    if (!input || this.__adjustingSelection || input.readOnly || this.disabled) {
+    if (!input || this.#adjustingSelection || input.readOnly || this.disabled) {
       return;
     }
 
@@ -244,14 +259,14 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
     // Clicking exactly on the left boundary of the current range is
     // indistinguishable from ArrowLeft and shifts one cell left. The spec
     // accepts that: inference is the trade for not owning caret movement.
-    const previous = this.__previousRange;
+    const previous = this.#previousRange;
     const cameFromArrowLeft = previous && previous[0] !== previous[1] && start === previous[0];
     if (cameFromArrowLeft && start > 0) {
       cell = start - 1;
     }
-    this.__adjustingSelection = true;
-    this.__select(cell, cell + 1, 'forward');
-    this.__adjustingSelection = false;
+    this.#adjustingSelection = true;
+    this.#select(cell, cell + 1, 'forward');
+    this.#adjustingSelection = false;
   };
 
   /**
@@ -267,12 +282,12 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
     super._setFocused(focused);
 
     if (focused) {
-      this.__placeCaretOnFocus();
+      this.#placeCaretOnFocus();
     }
   }
 
   /** @private */
-  __placeCaretOnFocus() {
+  #placeCaretOnFocus() {
     const input = this.inputElement;
     if (!input) {
       return;
@@ -283,11 +298,11 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
     if (value.length >= this.length) {
       // Full: clamp onto the last cell. A collapsed caret one past the end
       // leaves nothing highlighted, so the field looks unfocused while focused.
-      this.__select(this.length - 1, this.length, 'forward');
+      this.#select(this.length - 1, this.length, 'forward');
     } else {
       // Empty or partial: the append position, collapsed, so the next keystroke
       // appends instead of overwriting.
-      this.__select(value.length, value.length, 'none');
+      this.#select(value.length, value.length, 'none');
     }
   }
 
@@ -297,17 +312,17 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
    *
    * @private
    */
-  __select(start, end, direction) {
+  #select(start, end, direction) {
     this.inputElement.setSelectionRange(start, end, direction);
     // Direction inference compares against this, so it has to record every range
     // we set ourselves — including focus placement, or the first arrow key after
     // focus has nothing to compare against.
-    this.__previousRange = [start, end];
+    this.#previousRange = [start, end];
   }
 
   /** @private */
   __enforceLength(value, length) {
-    if (this.__truncating) {
+    if (this.#truncating) {
       return;
     }
 
@@ -322,9 +337,9 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
     const truncated = current.slice(0, length);
     console.warn(`<dc-code-field> value "${current}" exceeds length ${length}; truncated to "${truncated}".`);
 
-    this.__truncating = true;
+    this.#truncating = true;
     this.value = truncated;
-    this.__truncating = false;
+    this.#truncating = false;
   }
 
   /** @private */
@@ -334,21 +349,21 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
 
   /** @private */
   __lengthChanged(length) {
-    if (this.__revertingLength) {
+    if (this.#revertingLength) {
       return;
     }
 
     if (!Number.isInteger(length) || length < 1) {
       // SPEC §6.5.4: reject and warn rather than coerce. Coercion turns a
       // developer's mistake into a rendering puzzle.
-      console.warn(`<dc-code-field> length must be an integer >= 1, got ${length}. Keeping ${this.__lastValidLength}.`);
-      this.__revertingLength = true;
-      this.length = this.__lastValidLength;
-      this.__revertingLength = false;
+      console.warn(`<dc-code-field> length must be an integer >= 1, got ${length}. Keeping ${this.#lastValidLength}.`);
+      this.#revertingLength = true;
+      this.length = this.#lastValidLength;
+      this.#revertingLength = false;
       return;
     }
 
-    this.__lastValidLength = length;
+    this.#lastValidLength = length;
   }
 
   /** @private */
