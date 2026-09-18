@@ -107,6 +107,20 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
       },
 
       /**
+       * Index of the cell the selection currently identifies, or -1 when the
+       * field is not focused. Internal: `W-3` deliberately deferred exposing this
+       * until something consumed it, and `part="cell"[active]` is the public
+       * observable (SPEC §9).
+       *
+       * @protected
+       */
+      _activeCell: {
+        type: Number,
+        value: -1,
+        sync: true,
+      },
+
+      /**
        * Whether the code fills every cell. Read-only, reflected, and **derived
        * rather than latched** (SPEC §7.7) — deleting a character makes it false
        * again.
@@ -166,6 +180,71 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
           pointer-events: none;
         }
 
+        [part='cell'] {
+          /* Shrink in CSS, never in JS (§7.9). A JS sizer would need to observe the
+           element whose size it sets. */
+          flex: 1 1 auto;
+          min-width: 24px;
+          display: grid;
+          place-items: center;
+          position: relative;
+          box-sizing: border-box;
+          /* §9.1: derived, so Lumo and Aura differ through tokens rather than
+           through forked CSS. */
+          background: var(--vaadin-input-field-background);
+          border: var(--vaadin-input-field-border-width, 1px) solid
+            var(--vaadin-input-field-border-color, var(--vaadin-border-color, currentColor));
+          border-radius: var(--vaadin-code-field-cell-radius, var(--vaadin-radius-s, 4px));
+          color: var(--vaadin-input-field-value-color, inherit);
+          font-size: var(--vaadin-input-field-value-font-size, inherit);
+          /* Digits must not jitter as the code fills. */
+          font-variant-numeric: tabular-nums;
+        }
+
+        /* §9: the border is the primary indicator and the caret is secondary. It
+         must never be the caret alone — prefers-reduced-motion stops the blink,
+         and nothing would mark a cell that is selected rather than appended. */
+        [part='cell'][active] {
+          border-width: var(--vaadin-code-field-cell-active-border-width, 2px);
+          border-color: var(--vaadin-focus-ring-color, currentColor);
+        }
+
+        :host([readonly]) [part='cell'] {
+          background: transparent;
+          border: var(--vaadin-input-field-readonly-border, 1px dashed);
+        }
+
+        :host([disabled]) [part='cell'] {
+          background: var(--vaadin-input-field-disabled-background);
+          color: var(--vaadin-input-field-disabled-value-color, inherit);
+        }
+
+        :host([invalid]) [part='cell'] {
+          border-color: var(--vaadin-input-field-error-color);
+        }
+
+        [part='caret'] {
+          position: absolute;
+          width: var(--vaadin-code-field-caret-width, 2px);
+          height: 1lh;
+          background: var(--vaadin-code-field-caret-color, currentColor);
+          animation: dc-code-field-blink 1.1s steps(1, end) infinite;
+        }
+
+        @keyframes dc-code-field-blink {
+          50% {
+            opacity: 0;
+          }
+        }
+
+        /* §9: with motion disabled the caret must stop blinking — which is exactly
+         why it cannot be the only thing marking the active cell. */
+        @media (prefers-reduced-motion: reduce) {
+          [part='caret'] {
+            animation: none;
+          }
+        }
+
         /* Out of flow for two reasons, both load-bearing (SPEC §7.9.4): it keeps
          the ResizeObserver that sizes the font from observing an element whose
          size it changes, and it lets a password manager's badge overhang the
@@ -196,7 +275,7 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
           .invalid="${this.invalid}"
           theme="${ifDefined(this._theme)}"
         >
-          <div part="cells" aria-hidden="true"></div>
+          <div part="cells" aria-hidden="true"> ${this.#renderCells()} </div>
           <slot name="input"></slot>
         </vaadin-input-container>
 
@@ -269,6 +348,13 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
     }
 
     const { selectionStart: start, selectionEnd: end } = input;
+
+    // Track the active cell from whatever the selection is now, before deciding
+    // whether to widen. A selection the component did not set — a click, a drag,
+    // Shift+Arrow — still identifies a cell, and only #select would otherwise
+    // update it.
+    this._activeCell = Math.min(start, this.length - 1);
+
     if (start !== end) {
       return;
     }
@@ -369,6 +455,10 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
 
     if (focused) {
       this.#placeCaretOnFocus();
+    } else {
+      // No focus, no active cell: §9 requires the active-cell treatment to mean
+      // "this is where typing goes", which is untrue when nothing is focused.
+      this._activeCell = -1;
     }
   }
 
@@ -400,6 +490,7 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
    */
   #select(start, end, direction) {
     this.inputElement.setSelectionRange(start, end, direction);
+    this._activeCell = Math.min(start, this.length - 1);
     // Direction inference compares against this, so it has to record every range
     // we set ourselves — including focus placement, or the first arrow key after
     // focus has nothing to compare against.
@@ -684,6 +775,25 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
     // 'off' rather than unset: a code field should never receive the browser's
     // saved names or email addresses.
     this.autocomplete = oneTimeCode ? 'one-time-code' : 'off';
+  }
+
+  /**
+   * Cells are a presentation of one string value, never separate fields (SPEC
+   * §1). `aria-hidden` on the layer keeps the accessible name coming from the
+   * single input.
+   *
+   * @private
+   */
+  #renderCells() {
+    const value = this.value || '';
+
+    return Array.from({ length: this.length }, (_, index) => {
+      const active = index === this._activeCell;
+
+      return html`<div part="cell" cell-index="${index}" ?filled="${index < value.length}" ?active="${active}"
+        >${value[index] ?? ''}${active ? html`<div part="caret"></div>` : ''}</div
+      >`;
+    });
   }
 
   /** @protected */
