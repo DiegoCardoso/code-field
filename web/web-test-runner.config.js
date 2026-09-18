@@ -6,6 +6,11 @@ import { playwrightLauncher } from '@web/test-runner-playwright';
  */
 export default {
   nodeResolve: true,
+  // A wedged suite should fail fast. The default 120s turns "something never
+  // settles" into a two-minute wait locally and in CI, which is long enough
+  // that the real signal gets lost. Found while diagnosing a tooltip that never
+  // settled: the loop was unusable until this was lowered.
+  testsFinishTimeout: 20000,
   files: ['test/**/*.test.js'],
   browsers: [
     playwrightLauncher({
