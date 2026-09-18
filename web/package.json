@@ -49,6 +49,7 @@
     "@vaadin/vaadin-lumo-styles": "25.2.11",
     "@vaadin/vaadin-themable-mixin": "25.2.11",
     "@web/test-runner": "^1.0.0",
+    "@web/test-runner-commands": "^1.0.1",
     "@web/test-runner-playwright": "^1.0.0",
     "@web/test-runner-visual-regression": "^1.0.1",
     "chai": "^5.0.0",

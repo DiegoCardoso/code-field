@@ -190,6 +190,121 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
     `;
   }
 
+  /** @protected */
+  connectedCallback() {
+    super.connectedCallback();
+    // `selectionchange` only fires on `document`, so the listener cannot live on
+    // the input and has to be added and removed with the element.
+    document.addEventListener('selectionchange', this.__onSelectionChange);
+  }
+
+  /** @protected */
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    document.removeEventListener('selectionchange', this.__onSelectionChange);
+  }
+
+  /**
+   * SPEC §7.8.1.1–2. A collapsed caret sits *between* characters and cannot
+   * identify a cell, so it is widened to cover one — except at the append
+   * position, where a collapsed caret is exactly what makes the next keystroke
+   * append instead of overwrite.
+   *
+   * @private
+   */
+  __onSelectionChange = () => {
+    const input = this.inputElement;
+    if (!input || this.__adjustingSelection || input.readOnly || this.disabled) {
+      return;
+    }
+
+    if (input.getRootNode().activeElement !== input) {
+      return;
+    }
+
+    const { selectionStart: start, selectionEnd: end } = input;
+    if (start !== end) {
+      return;
+    }
+
+    const value = input.value || '';
+    const atAppendPosition = start === value.length && value.length < this.length;
+    if (atAppendPosition) {
+      return;
+    }
+
+    // Clamp so a caret past the last cell selects the last cell rather than
+    // nothing.
+    let cell = Math.min(start, this.length - 1);
+
+    // §7.8.1.3: ArrowLeft collapses a range onto its own start, so re-widening
+    // forward would land on the cell it started from and the key would appear to
+    // do nothing. Infer the direction by comparing against the previous range.
+    //
+    // Clicking exactly on the left boundary of the current range is
+    // indistinguishable from ArrowLeft and shifts one cell left. The spec
+    // accepts that: inference is the trade for not owning caret movement.
+    const previous = this.__previousRange;
+    const cameFromArrowLeft = previous && previous[0] !== previous[1] && start === previous[0];
+    if (cameFromArrowLeft && start > 0) {
+      cell = start - 1;
+    }
+    this.__adjustingSelection = true;
+    this.__select(cell, cell + 1, 'forward');
+    this.__adjustingSelection = false;
+  };
+
+  /**
+   * SPEC §7.3. Placement is set explicitly for every case rather than left to the
+   * browser: the default differs between engines, and Firefox is in the test
+   * matrix for exactly that reason.
+   *
+   * @param {boolean} focused
+   * @protected
+   * @override
+   */
+  _setFocused(focused) {
+    super._setFocused(focused);
+
+    if (focused) {
+      this.__placeCaretOnFocus();
+    }
+  }
+
+  /** @private */
+  __placeCaretOnFocus() {
+    const input = this.inputElement;
+    if (!input) {
+      return;
+    }
+
+    const value = input.value || '';
+
+    if (value.length >= this.length) {
+      // Full: clamp onto the last cell. A collapsed caret one past the end
+      // leaves nothing highlighted, so the field looks unfocused while focused.
+      this.__select(this.length - 1, this.length, 'forward');
+    } else {
+      // Empty or partial: the append position, collapsed, so the next keystroke
+      // appends instead of overwriting.
+      this.__select(value.length, value.length, 'none');
+    }
+  }
+
+  /**
+   * SPEC §7.8.1.5: always pass `direction`. Omitting it defaults to `forward`
+   * and collapses backward selections in Firefox.
+   *
+   * @private
+   */
+  __select(start, end, direction) {
+    this.inputElement.setSelectionRange(start, end, direction);
+    // Direction inference compares against this, so it has to record every range
+    // we set ourselves — including focus placement, or the first arrow key after
+    // focus has nothing to compare against.
+    this.__previousRange = [start, end];
+  }
+
   /** @private */
   __enforceLength(value, length) {
     if (this.__truncating) {
