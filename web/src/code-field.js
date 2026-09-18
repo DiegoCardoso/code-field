@@ -148,6 +148,37 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
     };
   }
 
+  /**
+   * §11.2: hiding the text is not enough — the browser still paints its own
+   * highlight behind a selected character, which shows through the cell as a
+   * coloured band. Both declarations are needed.
+   *
+   * This cannot live in the shadow stylesheet: `::slotted(input)::selection` is
+   * not a valid selector and is dropped silently, so the rule appears to be there
+   * and does nothing. `field-base` hits the same wall with `::placeholder` and
+   * solves it the same way — inject into the light-DOM scope, where
+   * `input::selection` works normally.
+   *
+   * `super` is not optional: the base supplies the `:autofill` overrides §11.3
+   * depends on, and replacing this getter would drop them.
+   *
+   * @protected
+   * @return {string[]}
+   */
+  get slotStyles() {
+    const tag = this.localName;
+
+    return [
+      ...super.slotStyles,
+      `
+        ${tag} > input[slot='input']::selection {
+          background: transparent !important;
+          color: transparent !important;
+        }
+      `,
+    ];
+  }
+
   static get delegateProps() {
     return [...super.delegateProps, 'inputMode'];
   }
@@ -262,13 +293,6 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
          the ResizeObserver that sizes the font from observing an element whose
          size it changes, and it lets a password manager's badge overhang the
          field without widening it. */
-        /* §11.2 needs both declarations: a transparent background alone still
-           paints the selected text in the highlight colour. */
-        ::slotted(input)::selection {
-          background: transparent !important;
-          color: transparent !important;
-        }
-
         ::slotted(input) {
           position: absolute;
           inset: 0;
