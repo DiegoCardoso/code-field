@@ -7,6 +7,7 @@ import '@vaadin/input-container/src/vaadin-input-container.js';
 import { defineCustomElement } from '@vaadin/component-base/src/define.js';
 import { ElementMixin } from '@vaadin/component-base/src/element-mixin.js';
 import { PolylitMixin } from '@vaadin/component-base/src/polylit-mixin.js';
+import { TooltipController } from '@vaadin/component-base/src/tooltip-controller.js';
 import { InputController } from '@vaadin/field-base/src/input-controller.js';
 import { InputFieldMixin } from '@vaadin/field-base/src/input-field-mixin.js';
 import { LabelledInputController } from '@vaadin/field-base/src/labelled-input-controller.js';
@@ -180,6 +181,8 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
           <slot name="helper"></slot>
         </div>
 
+        <slot name="tooltip"></slot>
+
         <div part="error-message">
           <slot name="error-message"></slot>
         </div>
@@ -260,6 +263,13 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
       }),
     );
     this.addController(new LabelledInputController(this.inputElement, this._labelController));
+
+    // Without this a slotted <vaadin-tooltip> has no target and never settles,
+    // which wedges Lit's update queue rather than failing — diagnosed in #4.
+    this._tooltipController = new TooltipController(this);
+    this._tooltipController.setPosition('top');
+    this._tooltipController.setAriaTarget(this.inputElement);
+    this.addController(this._tooltipController);
   }
 }
 

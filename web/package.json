@@ -45,6 +45,7 @@
     "@vaadin/input-container": "25.2.11",
     "@vaadin/testing-helpers": "^2.0.0",
     "@vaadin/text-field": "25.2.11",
+    "@vaadin/tooltip": "25.2.11",
     "@vaadin/vaadin-lumo-styles": "25.2.11",
     "@vaadin/vaadin-themable-mixin": "25.2.11",
     "@web/test-runner": "^1.0.0",

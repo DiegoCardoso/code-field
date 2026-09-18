@@ -7,6 +7,7 @@ import { expect } from 'chai';
 import { fixtureSync, nextRender } from '@vaadin/testing-helpers';
 import sinon from 'sinon';
 import '../src/code-field.js';
+import '@vaadin/tooltip/vaadin-tooltip.js';
 
 describe('code-field', () => {
   let field;
@@ -219,6 +220,17 @@ describe('code-field', () => {
       expect(input.required).to.be.true;
       expect(input.disabled).to.be.true;
       expect(input.readOnly).to.be.true;
+    });
+
+    it('should support a tooltip', async () => {
+      // SPEC §13 lists HasTooltip on the Flow side; the web component has to
+      // provide the slot and the controller for that to bind to anything.
+      const tooltip = document.createElement('vaadin-tooltip');
+      tooltip.setAttribute('slot', 'tooltip');
+      field.appendChild(tooltip);
+      await nextRender();
+
+      expect(tooltip.target).to.equal(field);
     });
 
     it('should forward name to the input so the field submits with a form', async () => {
