@@ -4,8 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>dc-code-field — dev page</title>
-    <script type="module" src="../src/code-field.js"></script>
-    <script type="module" src="../../node_modules/@vaadin/text-field/vaadin-text-field.js"></script>
+    <!-- Root-absolute on purpose. With a relative path, opening /web/dev without a
+         trailing slash resolves it against /web/ and the module 404s, so the element
+         silently never registers. -->
+    <script type="module" src="/web/src/code-field.js"></script>
+    <script type="module" src="/node_modules/@vaadin/text-field/vaadin-text-field.js"></script>
     <style>
       body {
         font-family: system-ui, sans-serif;

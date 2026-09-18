@@ -1,4 +1,5 @@
 import js from '@eslint/js';
+import globals from 'globals';
 
 /**
  * Minimal flat config. The monorepo's ruleset (eslint.config.js there) pulls in
@@ -12,17 +13,7 @@ export default [
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'module',
-      globals: {
-        console: 'readonly',
-        customElements: 'readonly',
-        document: 'readonly',
-        window: 'readonly',
-        HTMLElement: 'readonly',
-        navigator: 'readonly',
-        RegExp: 'readonly',
-        Date: 'readonly',
-        JSON: 'readonly',
-      },
+      globals: globals.browser,
     },
     rules: {
       'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
@@ -31,12 +22,7 @@ export default [
   {
     files: ['web/test/**/*.js'],
     languageOptions: {
-      globals: {
-        describe: 'readonly',
-        it: 'readonly',
-        beforeEach: 'readonly',
-        afterEach: 'readonly',
-      },
+      globals: globals.mocha,
     },
   },
   {
