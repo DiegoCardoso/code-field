@@ -393,6 +393,8 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
    * @override
    */
   _onInput(event) {
+    this.#sanitiseInputInPlace();
+
     this.#fromUser = true;
     try {
       super._onInput(event);
@@ -401,6 +403,48 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
     }
 
     this.#clampCaretWhenFull();
+  }
+
+  /**
+   * §7.8.3: rewrite **only the offending range** with `setRangeText`, never a
+   * whole-value assignment, and restore the selection.
+   *
+   * `beforeinput` cannot be reliably prevented for composition, so characters the
+   * pattern rejects can still reach the input — this is the recovery. Assigning
+   * the whole value would work, but drops the caret at the end, throwing the user
+   * to the last cell after an autocorrect artefact mid-code.
+   *
+   * Nothing stripped means no rewrite at all, which is what keeps undo intact on
+   * the ordinary typing path (§7.8.2, §11.9).
+   *
+   * @private
+   */
+  #sanitiseInputInPlace() {
+    const input = this.inputElement;
+    if (!input) {
+      return;
+    }
+
+    const current = input.value || '';
+    if (this.#sanitise(current) === current) {
+      return;
+    }
+
+    const caret = input.selectionStart ?? current.length;
+    let removedBeforeCaret = 0;
+
+    // Right to left, so earlier indices stay valid as characters are removed.
+    for (let index = current.length - 1; index >= 0; index -= 1) {
+      if (this.#sanitise(current[index]) === '') {
+        input.setRangeText('', index, index + 1, 'preserve');
+        if (index < caret) {
+          removedBeforeCaret += 1;
+        }
+      }
+    }
+
+    const restored = Math.max(0, caret - removedBeforeCaret);
+    this.#select(restored, restored, 'none');
   }
 
   /**

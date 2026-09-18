@@ -182,4 +182,138 @@ describe('input pipeline', () => {
       expect(field.querySelector('input').value).to.equal(field.value);
     });
   });
+
+  describe('deletion', () => {
+    const input = () => field.querySelector('input');
+
+    it('should delete the active cell and shift left', async () => {
+      // §7.1's worked example: "1234" in a 6-cell field, caret on cell 1,
+      // Backspace -> "134". Cells 2-3 slide left. This sliding is the visible
+      // consequence P0-4 exists to sign off.
+      field.value = '1234';
+      field.focus();
+      input().setSelectionRange(1, 2, 'forward');
+
+      await sendKeys({ press: 'Backspace' });
+      await nextRender();
+
+      expect(field.value).to.equal('134');
+    });
+
+    it('should delete the preceding character at the append position', async () => {
+      // §7.2: at the append position there is no selected character, so
+      // Backspace takes the one before it.
+      field.value = '1234';
+      field.focus();
+      input().setSelectionRange(4, 4, 'none');
+
+      await sendKeys({ press: 'Backspace' });
+      await nextRender();
+
+      expect(field.value).to.equal('123');
+    });
+
+    it('should shift left on Delete and flip complete false', async () => {
+      // §7.2: Delete on cell 0 of a full code drops the length below `length`,
+      // so `complete` is false again — it is derived, never latched (§7.7).
+      field.value = '123456';
+      field.focus();
+      input().setSelectionRange(0, 1, 'forward');
+      expect(field.complete).to.be.true;
+
+      await sendKeys({ press: 'Delete' });
+      await nextRender();
+
+      expect(field.value).to.equal('23456');
+      expect(field.complete).to.be.false;
+    });
+
+    it('should remove a selected range', async () => {
+      field.value = '123456';
+      field.focus();
+      input().setSelectionRange(1, 4, 'forward');
+
+      await sendKeys({ press: 'Backspace' });
+      await nextRender();
+
+      expect(field.value).to.equal('156');
+    });
+
+    it('should not warn while deleting', async () => {
+      field.value = '123456';
+      warn.resetHistory();
+      field.focus();
+      input().setSelectionRange(0, 1, 'forward');
+
+      await sendKeys({ press: 'Backspace' });
+      await nextRender();
+
+      expect(warn.called).to.be.false;
+    });
+  });
+
+  describe('post-hoc sanitising', () => {
+    // §7.8.3's mechanism, not §7.8.3's trigger. Android GBoard composition cannot
+    // be reproduced here (§14.3 marks it UNTESTED), but the *recovery* path can:
+    // a disallowed character that reached the input despite `beforeinput` must be
+    // removed on `input`, without a warning, because the user did nothing wrong.
+    const bypassInto = async (value) => {
+      const input = field.querySelector('input');
+      field.focus();
+      input.value = value;
+      input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      await nextRender();
+    };
+
+    it('should strip a character that bypassed beforeinput', async () => {
+      await bypassInto('12a3');
+      expect(field.value).to.equal('123');
+    });
+
+    it('should not warn about a character the user did not deliberately assign', async () => {
+      warn.resetHistory();
+      await bypassInto('12a3');
+      expect(warn.called, 'a composition artefact is not a developer error').to.be.false;
+    });
+
+    it('should keep the caret where the user was typing', async () => {
+      // §7.8.3: rewrite only the offending range and restore the selection.
+      // A whole-value assignment drops the caret at the end, so an autocorrect
+      // artefact mid-code would throw the user to the last cell — the visible
+      // cost of the cheap implementation.
+      const input = field.querySelector('input');
+      field.focus();
+      input.value = '12a345';
+      input.setSelectionRange(3, 3, 'none');
+      input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      await nextRender();
+
+      expect(field.value).to.equal('12345');
+      // 'a' was at index 2, so the caret belongs at 2 — not at the end.
+      expect(input.selectionStart).to.be.at.most(3);
+    });
+
+    it('should leave a clean value untouched', async () => {
+      await bypassInto('1234');
+      expect(field.value).to.equal('1234');
+    });
+  });
+
+  describe('undo', () => {
+    it('should keep undo working on the untouched path', async () => {
+      // §7.8.2: when nothing is stripped, the native insertion proceeds untouched
+      // so the undo stack survives. This is the user-facing proxy for "the fast
+      // path performs no rewrite" — spying on setRangeText would test the
+      // implementation instead of the guarantee.
+      field.focus();
+      await sendKeys({ type: '123' });
+      await nextRender();
+      expect(field.value).to.equal('123');
+
+      await sendKeys({ press: `${MOD}+z` });
+      await nextRender();
+
+      expect(field.value, 'undo did nothing — something rewrote the value').to.not.equal('123');
+    });
+  });
 });
