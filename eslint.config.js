@@ -18,6 +18,7 @@ export default [
         document: 'readonly',
         window: 'readonly',
         HTMLElement: 'readonly',
+        navigator: 'readonly',
         RegExp: 'readonly',
         Date: 'readonly',
         JSON: 'readonly',
