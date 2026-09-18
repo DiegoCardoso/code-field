@@ -1,0 +1,11 @@
+# The specification documents are hand-wrapped for readability and reviewed as
+# prose. Letting Prettier reflow them produces large diffs that hide real edits.
+SPEC.md
+PLAN.md
+P0-FINDINGS.md
+
+# Design artefact, generated — not ours to format.
+docs/design/
+
+package-lock.json
+node_modules/

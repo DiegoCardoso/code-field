@@ -1,8 +1,17 @@
 # Phase 0 — Findings
 
 Probe: `@vaadin/*` npm packages installed and read directly (`field-base`, `component-base`,
-`vaadin-themable-mixin`, `input-container`, `text-field`); Maven sources jars for
-`vaadin-text-field-flow`, `vaadin-flow-components-base`, `flow-server`, `flow-data`.
+`vaadin-themable-mixin`, `input-container`, `text-field`, `vaadin-lumo-styles`); Maven sources
+jars for `vaadin-text-field-flow`, `vaadin-flow-components-base`, `flow-server`, `flow-data`.
+
+**Local monorepo checkout** at `/Users/cardoso/Developer/Vaadin/web-components/main` is handy
+for reading, but it is **`25.4.0-alpha0`** — two minors ahead of the `25.2.x` pin, on a feature
+branch. Read it for orientation; **confirm anything load-bearing against the pinned npm
+package** before writing it into this spec. Two things confirmed that way already:
+
+- `--vaadin-input-field-readonly-border` exists identically at 25.2.11 (SPEC §9.1.1).
+- **Lumo is not going away.** 25.4-alpha still ships `packages/vaadin-lumo-styles` alongside
+  `packages/aura`, so "Lumo **and** Aura in v1" is not betting on a theme being removed.
 
 ---
 

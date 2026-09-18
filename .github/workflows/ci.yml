@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+      - run: npm ci
+      - name: Prettier
+        run: npm run lint:format
+      - name: ESLint
+        run: npm run lint:js
+
+  chrome:
+    name: Unit tests (Chrome)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+      - run: npm ci
+      # The runner ships Google Chrome, but install it explicitly so the job does
+      # not depend on the image's contents. `channel: 'chrome'` in the test config
+      # means real Chrome, not bundled Chromium — deliberate, because `:autofill`
+      # and password-manager behaviour differ between them (SPEC §11.3, §14.1).
+      - name: Install Chrome
+        run: npx playwright install chrome --with-deps
+      - name: Test
+        working-directory: web
+        run: npx web-test-runner
+
+  firefox:
+    name: Unit tests (Firefox)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+      - run: npm ci
+      # Firefox is not optional coverage: it carries W-3's backward-selection
+      # case (SPEC §7.8.1), which Chromium cannot exercise.
+      - name: Install Firefox
+        run: npx playwright install firefox --with-deps
+      - name: Test
+        working-directory: web
+        run: npx web-test-runner --config web-test-runner-firefox.config.js
+
+# Not wired yet, deliberately:
+#
+#   visual  — needs baselines, which land with W-5/W-8. Per SPEC §14.2 it must run
+#             in a pinned container; the monorepo uses
+#             mcr.microsoft.com/playwright:v1.63.0-noble, and we should match.
+#   flow-it — cannot run before W-7 (P0-6.1). Nightly thereafter.
