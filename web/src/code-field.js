@@ -249,11 +249,37 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
          the ResizeObserver that sizes the font from observing an element whose
          size it changes, and it lets a password manager's badge overhang the
          field without widening it. */
+        /* §11.2 needs both declarations: a transparent background alone still
+           paints the selected text in the highlight colour. */
+        ::slotted(input)::selection {
+          background: transparent !important;
+          color: transparent !important;
+        }
+
         ::slotted(input) {
           position: absolute;
           inset: 0;
           width: 100%;
           box-sizing: border-box;
+
+          /* §11.1 / §11.12: the cells render the characters, so the real text
+             must be held without being shown — or every code is drawn twice,
+             offset.
+             
+             !important is load-bearing, not stylistic. The input is light DOM,
+             so a page-wide "input { color: ... }" reaches it and would render the
+             real code underneath the cells. Importance also reverses the
+             shadow/outer cascade order, so these beat even an !important page
+             rule. Apps lose the ability to override them deliberately; §11.12
+             calls that the intended trade.
+             
+             Five properties, not four: -webkit-text-fill-color outranks "color"
+             and is what ":autofill" uses (§11.3), so omitting it means autofill
+             reveals the text. */
+          color: transparent !important;
+          -webkit-text-fill-color: transparent !important;
+          caret-color: transparent !important;
+          background: transparent !important;
         }
       `,
     ];
