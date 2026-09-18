@@ -112,4 +112,67 @@ describe('cells', () => {
       });
     }
   });
+
+  describe('the synthetic caret', () => {
+    // Assertions are on booleans, never on the element itself: a failing
+    // `expect(<element>)` puts a DOM node into the failure message, and
+    // web-test-runner hangs serialising it back to Node — a silent 20s timeout
+    // with no error, rather than a red test.
+    const hasCaret = (index) => !!cells()[index].querySelector('[part~="caret"]');
+
+    const settle = async () => {
+      await nextFrame();
+      await nextFrame();
+    };
+
+    it('should show at the append position', async () => {
+      // A collapsed caret really is an insertion point there: the next keystroke
+      // appends (§7.8.1.2). This is the one place the caret metaphor is true.
+      field.value = '123';
+      field.focus();
+      await settle();
+
+      expect(field._activeCell, 'precondition: append position active').to.equal(3);
+      expect(hasCaret(3), 'no caret at the append position').to.be.true;
+    });
+
+    it('should show in an empty field', async () => {
+      field.focus();
+      await settle();
+
+      expect(hasCaret(0)).to.be.true;
+    });
+
+    it('should not show over a character', async () => {
+      // The active cell is a one-character *selection* (§7.8.1) — typing
+      // replaces it. An insertion point drawn through the character claims
+      // something untrue, and strikes the digit through.
+      field.value = '123456';
+      field.focus();
+      field.querySelector('input').setSelectionRange(2, 3, 'forward');
+      await settle();
+
+      expect(field._activeCell, 'precondition: cell 2 active').to.equal(2);
+      expect(hasCaret(2), 'caret drawn over a selected character').to.be.false;
+    });
+
+    it('should not show on a full field, where the last cell is selected', async () => {
+      field.value = '123456';
+      field.focus();
+      await settle();
+
+      expect(field._activeCell).to.equal(5);
+      expect(hasCaret(5)).to.be.false;
+    });
+
+    it('should still mark the active cell without a caret', async () => {
+      // §9: the border is the primary indicator, which is why removing the caret
+      // here loses nothing.
+      field.value = '123456';
+      field.focus();
+      await settle();
+
+      expect(cells()[5].hasAttribute('active')).to.be.true;
+    });
+  });
 });

@@ -966,9 +966,15 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
 
     return Array.from({ length: this.length }, (_, index) => {
       const active = index === this._activeCell;
+      // Only where the selection is genuinely collapsed — the append position.
+      // Everywhere else the active cell is a one-character *selection* (§7.8.1)
+      // and typing replaces it, so an insertion point would claim something
+      // untrue and strike through the character. §9's accent border is the
+      // primary indicator and carries that case on its own.
+      const showCaret = active && index === value.length;
 
       return html`<div part="cell" cell-index="${index}" ?filled="${index < value.length}" ?active="${active}"
-        >${value[index] ?? ''}${active ? html`<div part="caret"></div>` : ''}</div
+        >${value[index] ?? ''}${showCaret ? html`<div part="caret"></div>` : ''}</div
       >`;
     });
   }
