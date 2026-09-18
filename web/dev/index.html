@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>dc-code-field — dev page</title>
+    <script type="module" src="../src/code-field.js"></script>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 0;
+        padding: 32px;
+        max-width: 1100px;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      h2 {
+        font-size: 15px;
+        margin-top: 32px;
+      }
+      .note {
+        background: #fffbe6;
+        border: 1px solid #e8d98a;
+        border-radius: 6px;
+        padding: 12px 16px;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .readout {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 4px 16px;
+        font:
+          12px/1.6 ui-monospace,
+          monospace;
+        background: #f6f7f9;
+        border-radius: 6px;
+        padding: 12px 16px;
+        max-width: 420px;
+      }
+      .readout dt {
+        color: #666;
+      }
+      .readout dd {
+        margin: 0;
+      }
+      #log {
+        font:
+          12px/1.6 ui-monospace,
+          monospace;
+        background: #f6f7f9;
+        border-radius: 6px;
+        padding: 12px 16px;
+        max-width: 420px;
+        min-height: 80px;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1><code>&lt;dc-code-field&gt;</code> — dev page</h1>
+
+    <p class="note">
+      <strong>Scaffold (<code>W-1</code>).</strong> The component is an empty shell until
+      <code>W-2</code>–<code>W-4</code>. This page exists so the toolchain has a target and so the state readout and
+      event log are in place before the behaviour that needs them. The §14.2 state matrix and visual baselines land with
+      <code>W-5</code>/<code>W-8</code>.
+    </p>
+
+    <h2>Live field</h2>
+    <dc-code-field id="field"></dc-code-field>
+
+    <h2>Field state</h2>
+    <!-- SPEC §7.6 / §7.7: the fastest way to see the user-originated rule and the
+         commit ordering actually holding, once W-4 and W-7 land. -->
+    <dl class="readout">
+      <dt>value</dt>
+      <dd id="s-value">—</dd>
+      <dt>complete</dt>
+      <dd id="s-complete">—</dd>
+      <dt>active cell</dt>
+      <dd id="s-active">—</dd>
+      <dt>selection</dt>
+      <dd id="s-selection">—</dd>
+    </dl>
+
+    <h2>Events</h2>
+    <div id="log">(no events yet)</div>
+
+    <script type="module">
+      const field = document.querySelector('#field');
+      const log = document.querySelector('#log');
+      const lines = [];
+
+      // Ordering matters: SPEC §7.7 commits value-changed -> change -> code-complete.
+      for (const type of ['input', 'value-changed', 'change', 'code-complete']) {
+        field.addEventListener(type, (e) => {
+          lines.unshift(
+            `${new Date().toISOString().slice(11, 23)}  ${type}${e.detail ? `  ${JSON.stringify(e.detail)}` : ''}`,
+          );
+          log.textContent = lines.slice(0, 12).join('\n');
+        });
+      }
+
+      const render = () => {
+        const input = field.querySelector('input');
+        document.querySelector('#s-value').textContent = JSON.stringify(field.value ?? '');
+        document.querySelector('#s-complete').textContent = String(field.complete ?? '—');
+        document.querySelector('#s-active').textContent = '—';
+        document.querySelector('#s-selection').textContent = input
+          ? `[${input.selectionStart}, ${input.selectionEnd}] ${input.selectionDirection ?? ''}`
+          : '—';
+      };
+
+      field.addEventListener('value-changed', render);
+      document.addEventListener('selectionchange', render);
+      render();
+    </script>
+  </body>
+</html>

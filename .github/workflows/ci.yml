@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint:format
+
+  unit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Firefox carries W-3's backward-selection case (SPEC §7.8.1), which
+        # Chromium cannot exercise. It is not optional coverage.
+        browser: [chromium, firefox]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Unit tests (${{ matrix.browser }})
+        working-directory: web
+        run: |
+          if [ "${{ matrix.browser }}" = "firefox" ]; then
+            npx web-test-runner --config web-test-runner-firefox.config.js
+          else
+            npx web-test-runner
+          fi
+
+# Not wired yet, deliberately:
+#
+#   visual  — needs baselines, which land with W-5/W-8. Per SPEC §14.2 it must run
+#             in a pinned container; the monorepo uses
+#             mcr.microsoft.com/playwright:v1.63.0-noble, and we should match.
+#   flow-it — cannot run before W-7. Until then flow/ resolves the web package as
+#             file:../web, which a clean CI checkout has, but the Flow module
+#             itself does not exist yet (F-1). Nightly, per P0-6.
