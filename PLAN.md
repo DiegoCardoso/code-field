@@ -201,13 +201,59 @@ bump policy, and JDK 21 in the Maven config and CI.
 
 # Phase 1 — v1
 
+## Current state
+
+Written down because it is the first thing a new session needs and the least recoverable.
+
+| Task | State |
+|---|---|
+| `W-1` Scaffolding | ✅ Complete |
+| `W-2` Field shell | ✅ Complete |
+| `W-3` Selection engine | ✅ Complete |
+| `W-4` Input pipeline | ✅ Complete |
+| `W-5` Cells and geometry | 🟡 Cells, click-to-position, caret done. **Outstanding:** §11.4's vertical half (`font-size` from height); item 6 widen-and-clip **blocked on `P0-1`** |
+| `W-6` Fill, hazards | 🟡 Input hiding (§11.12), selection band (§11.2), `clearElement` done. **Outstanding:** fill-detection polling (§7.5, needs `P0-1`), iOS letter-spacing compression, defensive stylesheet insertion (§11.8) |
+| `W-7` Validation, events | ⬜ Not started — **unblocked, and the API freeze gate for the whole Flow track** |
+| `W-8` Base styles | ⬜ Not started — read §9.1.2 first; the derivation table is largely disproved (issue #26) |
+| `W-9` Tests and docs | ⬜ Not started |
+| `F-1`…`F-5` | ⬜ Not started. `F-1` is unblocked and explicitly parallelisable |
+
+**121 tests**, green on Chrome and Firefox. Run with `npm test`; Firefox needs
+`--config web-test-runner-firefox.config.js`. Dev page: `npm start`, or `start:lumo` /
+`start:aura`.
+
+### Open issues
+
+| # | What |
+|---|---|
+| 3 | `P0-4` — the mid-edit slide verdict. **Yours.** Still the only gate that can invalidate SPEC §7 |
+| 9 | An `autofocus` test wedges the suite; reproduces only in the full file |
+| 26 | §9.1's derivation tokens are mostly unset by the themes — read before `W-8` |
+
+### Spec claims corrected by measurement in Phase 1
+
+Recorded here because each one cost real time to discover and would otherwise be re-derived:
+
+- **§7.8.1.4** — "no browser fires `selectionchange` on deletion or cut" is false in Chromium
+  and Firefox. No manual dispatch is implemented.
+- **§7.1** — full-field typing: Chrome left the caret past the last cell so extra keys were
+  silently swallowed. Firefox was correct. Fixed with an explicit clamp.
+- **§7.3** — click-to-position needs §11.4.1's horizontal text metrics, which v2 did not
+  specify at all.
+- **§9.1** — the derivation tokens are mostly unset by the themes (§9.1.2).
+- **§11.10** — `separator=""` is *not* an iOS mitigation; the cost is the separator's width.
+- **§13** — `AbstractSinglePropertyField` holds, but `InputField`/`HasValidator` were missing
+  and `vaadin-flow-components-base` must be an explicit dependency.
+
+---
+
 Two tracks. The web track is strictly sequential through `W-4`; after that it fans out. The
 Flow track can start at `F-1` in parallel but must not cut the Java API until the web value/
 event surface has stopped moving (end of `W-7`).
 
 ## Web component
 
-### `W-1` — Repo scaffolding
+### `W-1` — Repo scaffolding — ✅ **COMPLETE**
 **Depends:** `P0-2` (dependency set), `P0-5` (pin), `P0-6` (prefix, CI)
 
 1. `git init`; one repo with `web/` and `flow/`; license, `README`, `CONTRIBUTING.md` carrying
@@ -230,7 +276,7 @@ event surface has stopped moving (end of `W-7`).
 
 **Exit:** `npm test` green on an empty component; CI green; dev page loads.
 
-### `W-2` — Field shell
+### `W-2` — Field shell — ✅ **COMPLETE**
 **Depends:** `W-1`, `P0-3`
 
 1. `code-field.js` + `code-field-mixin.js`, composing per the `P0-3` appendix:
@@ -247,7 +293,7 @@ event surface has stopped moving (end of `W-7`).
 **Exit:** the field renders label/helper/error identically to a `<vaadin-text-field>` in a
 side-by-side dev page; SPEC §14.1's "Value" bullet passes; the canary test passes.
 
-### `W-3` — Selection engine
+### `W-3` — Selection engine — ✅ **COMPLETE**
 **Depends:** `W-2` · **The hard part. Do not parallelise it with `W-4`.**
 
 Implements SPEC §7.8.1 and §7.3.
@@ -264,7 +310,7 @@ Implements SPEC §7.8.1 and §7.3.
 **Exit:** SPEC §14.1's Navigation and Focus bullets pass, including the Firefox
 backward-selection case and click-to-position on every cell.
 
-### `W-4` — Input pipeline
+### `W-4` — Input pipeline — ✅ **COMPLETE**
 **Depends:** `W-3`
 
 Implements SPEC §7.8.2–§7.8.4, §7.1, §7.2, §7.4.
@@ -285,7 +331,7 @@ Implements SPEC §7.8.2–§7.8.4, §7.1, §7.2, §7.4.
 **Exit:** SPEC §14.1's Typing, Deletion, Paste and Input-pipeline bullets pass, including the
 assertion that the fast path performs no rewrite.
 
-### `W-5` — Cell rendering and geometry
+### `W-5` — Cell rendering and geometry — 🟡 **PARTIAL**
 **Depends:** `W-4`, `P0-1` (badge widen amount)
 
 Implements SPEC §7.9.
@@ -301,13 +347,23 @@ Implements SPEC §7.9.
 4. The single `ResizeObserver`: field height → input `font-size` (SPEC §11.4). Assert no
    second observer and no loop.
 5. `direction: ltr` on the cell row and input; chrome mirroring left to `DirMixin`.
-6. Widen-and-clip per `P0-1`'s findings.
+6. Widen-and-clip per `P0-1`'s findings. **Blocked** — `P0-1` was narrowed but never run.
 7. No wrapping; overflow past the floor.
+
+**Done:** 1, 2, 3, 5, 7, plus click-to-position, which needed §11.4.1's horizontal text
+metrics — unspecified in v2 and the largest single discovery of this phase. The caret renders
+only at the append position (§9); elsewhere the active cell is a *selection* and an insertion
+point would be a lie. Focus placement is skipped when focus came from a pointer, or it
+overrules every click.
+
+**Outstanding:** item 4's vertical half (`font-size` from field height, for the iOS magnifier
+and drag handles) and item 6. Geometry (shrink, floor, overflow) is implemented but **has no
+tests** — those seams were declined; `W-8`'s visual baselines are the intended cover.
 
 **Exit:** SPEC §14.1's Geometry bullet passes; a container-resize test shows no observer
 loop; RTL test shows LTR cells with mirrored chrome.
 
-### `W-6` — Fill, hazards, hardening
+### `W-6` — Fill, hazards, hardening — 🟡 **PARTIAL**
 **Depends:** `W-4`, `P0-1`
 
 1. `oneTimeCode` → `autocomplete="one-time-code"`.
@@ -321,10 +377,17 @@ loop; RTL test shows LTR cells with mirrored chrome.
 6. iOS letter-spacing compression behind `@supports (-webkit-touch-callout: none)`.
 7. Defensive stylesheet insertion (SPEC §11.8).
 
+**Done:** 3 (the five hiding properties, §11.12), 5 (`::selection` via `SlotStylesMixin` —
+`::slotted(input)::selection` is invalid and silently dropped, see §11.2), and the
+`clearElement` override (§6.1).
+
+**Outstanding:** 1, 2 (fill detection needs `P0-1`'s answer on whether polling is required),
+4's page-CSS regression test is **done**, 6 (iOS letter-spacing compression), 7.
+
 **Exit:** SPEC §14.1's page-CSS test passes; the §14.3 desktop and autofill rows are run once
 manually and recorded.
 
-### `W-7` — Validation, commit, events
+### `W-7` — Validation, commit, events — ⬜ **NEXT**
 **Depends:** `W-4` · **Gate for `F-2`: the Java API must not be cut before this lands.**
 
 1. The `_programmatic` origin flag, set only by the property setter (SPEC §7.6).
@@ -340,7 +403,7 @@ manually and recorded.
 **Exit:** SPEC §14.1's Events, Commit and Validation bullets pass — in particular
 "`code-complete` does not fire on any programmatic set, including the truncation path".
 
-### `W-8` — Base styles (Lumo + Aura via tokens)
+### `W-8` — Base styles (Lumo + Aura via tokens) — ⚠️ **read SPEC §9.1.2 first**
 **Depends:** `W-5` · **Smaller than originally planned** — `P0-2` established that Vaadin 25
 components ship their own base styles and the themes are token layers, so this is one
 stylesheet, not two theme implementations.
@@ -352,6 +415,10 @@ stylesheet, not two theme implementations.
    `--vaadin-field-baseline-input-height` is an override hook, not a theme-set token. Define
    `--vaadin-code-field-*` only for gap, radius, active border width, caret and separator
    colour.
+   **§9.1's derivation table is largely disproved** (§9.1.2, issue #26): the themes publish
+   *primitives* and style `::part(input-field)` directly, so most `--vaadin-input-field-*`
+   names are unset and the cells currently run on fallbacks. Rewrite the table before writing
+   the stylesheet.
    Radius follows the platform's own pattern:
    `var(--vaadin-code-field-cell-radius, var(--vaadin-radius-s))` (SPEC §9.1).
    Per-state treatment per SPEC §9.1.1, including read-only via

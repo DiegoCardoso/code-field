@@ -56,6 +56,43 @@ Two deliberate divergences, both forced:
   container — the monorepo uses `mcr.microsoft.com/playwright:v1.63.0-noble`) and Flow ITs
   (impossible before `W-7`; nightly thereafter).
 
+## Test harness gotchas
+
+Each of these cost real time to find and gives no useful signal on its own.
+
+**Never assert on a DOM element.** A failing `expect(<element>).to.exist` puts a DOM node into
+the assertion message, and web-test-runner **hangs serialising it back to Node**: the suite
+reports _zero_ tests and times out with no error, instead of a red test. Assert on booleans —
+`expect(!!el).to.be.true`.
+
+**A wedged suite is the standard failure shape here**, so `testsFinishTimeout` is lowered to
+20s. The 120s default turns "something never settles" into a two-minute wait with nothing to
+read. When a suite reports 0 tests and times out, bisect the file; do not look for an error.
+
+**Synthetic `KeyboardEvent`s do not move a caret.** Browsers ignore untrusted events for
+selection, so a suite built on them passes while asserting nothing. Use `sendKeys` from
+`@web/test-runner-commands`; `test/tooling-smoke.test.js` asserts the harness really drives
+the browser, so that assumption cannot rot silently.
+
+**Firefox ignores `clipboardData` passed to the `ClipboardEvent` constructor.** A synthetic
+paste tests nothing there. Paste tests do a real clipboard round-trip with keys instead.
+
+**Platform-dependent shortcuts must be derived, not hard-coded.** Cut/copy/paste and
+select-all use `Meta` on macOS and `Control` elsewhere; development is macOS and CI is Linux,
+so hard-coding either passes locally and fails in CI, or the reverse. Pick from
+`navigator.platform`.
+
+**`field.focus()` re-runs focus placement** (§7.3), overwriting any selection a test set up.
+Where a test needs a specific selection, focus _first_, then set it — and note that clipboard
+helpers which focus internally will destroy it.
+
+**Two Vaadin test packages are monorepo-internal and unpublished**: `@vaadin/chai-plugins`
+(use `chai`) and `@vaadin/test-runner-commands` (use `@web/test-runner-commands`).
+
+**Mutation-test anything that passed on its first run.** Several tests in this repo looked
+like coverage and caught nothing — removing `LabelledInputController` broke no test until an
+association assertion was added. Break the code deliberately and confirm the test fails.
+
 ## Testing on real devices
 
 SPEC §14.3 is owned by the author and gated at **`R-1` only**. It is trimmed to hardware that

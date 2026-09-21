@@ -243,6 +243,16 @@ Plus the standard field API from the base mixins: `label`, `helperText`, `errorM
   cell row fights the 24×24 target-size floor (§10) and the overlay geometry (§7.9). Apps
   that want one compose it into the `suffix` slot. `clear()` / `HasValue.clear()` remain —
   they are a method, not an affordance, and the javadoc must not imply otherwise.
+
+  **The web component must still override `get clearElement()` to return `null`.**
+  `ClearButtonMixin` arrives regardless, because `allowedCharPattern` is declared in
+  `InputControlMixin`, which composes it directly — the two cannot be separated, and §4.1
+  deliberately reuses that per-character rejection. (`vaadin-slider` avoids the mixin entirely
+  by extending `FieldMixin`; that route is closed to us for the same reason.) Without the
+  override, every instance logs *"Please implement the 'clearElement' property"* into the
+  consuming application's console — once per field. `null` is a documented return value and
+  the base's only consumer is `if (this.clearElement)`, so this is the accurate answer rather
+  than a workaround.
 - **Per-cell content slots.** Composable slots would let the app desynchronise the visual
   cell count from `length`.
 - **`maxlength` on the inner input.** See §7.8.4.
@@ -337,7 +347,11 @@ still (PLAN.md `P0-4`).
   sits one past the last cell and nothing is highlighted.
 - **Clicking a cell** places the caret at that character by native hit testing, not click
   handlers: the decorative layer is `pointer-events: none`, the input is `pointer-events:
-  all`, and the browser resolves the position itself.
+  all`, and the browser resolves the position itself. Requires §11.4.1's text metrics.
+- **Focus placement must not run when focus arrived from a pointer.** Clicking an unfocused
+  full field focuses it, and the clamp above then moves the caret away from the cell the user
+  aimed at — silently overruling every click. Track pointer-originated focus and skip
+  placement for it.
 - `ArrowLeft`/`ArrowRight` move by one cell. `Home`/`End` jump to first/last.
   `Shift+Arrow` extends a native selection.
 
@@ -582,6 +596,12 @@ a filled/inverted cell (competes with the `filled` state attribute and hurts car
 character legibility) and over caret-only (weakest affordance on touch, and invisible under
 `prefers-reduced-motion` if the blink is the only signal).
 
+**The caret renders only where the selection is genuinely collapsed** — the append position.
+Everywhere else the active cell is a one-character *selection* (§7.8.1) and typing replaces
+it, so an insertion point claims something untrue and strikes through the character. The
+accent border carries those cases alone, which is the same property that makes it survive
+`prefers-reduced-motion`.
+
 The mockup (§9.2) built all three and reached the same conclusion independently, framing the
 chosen one as *"the same 1px-to-2px outline shift a text field already makes on focus"* — the
 better articulation, because it makes the treatment a **reuse of existing field behaviour**
@@ -620,9 +640,9 @@ Constraints on both themes:
 The base stylesheet derives from the `--vaadin-*` tokens the themes set, so that most of the
 Lumo/Aura difference is encoded in tokens rather than in forked CSS.
 
-> **Status: provisional.** The *mechanism* is confirmed; the exact per-property mapping below
-> is **not fully verified** and `W-8` must confirm each row against the pinned packages before
-> relying on it. What is confirmed: the themes set a **primitive scale**
+> **Status: provisional, and partly disproved — see §9.1.2.** The *mechanism* is confirmed;
+> the exact per-property mapping below is **not** verified, and measurement through the dev
+> page's theme switcher showed most of it does not hold. `W-8` must rewrite it. What is confirmed: the themes set a **primitive scale**
 > (Aura's `size.css` defines `--vaadin-padding-block-container`, `--vaadin-radius-s`,
 > `--vaadin-gap-*`), and components consume those primitives through computed fallbacks. Do
 > not assume a component-level token exists just because a name appears in a `var()`.
@@ -665,6 +685,36 @@ a component-scoped token falling back to the **global radius scale**. So use
 `var(--vaadin-code-field-cell-radius, var(--vaadin-radius-s))`. The theme difference the
 mockup shows (Aura 9px, Lumo 8px) then comes from `--vaadin-radius-s`, which each theme sets
 — again, no forking.
+
+### 9.1.2 What the themes actually publish — **measured**
+
+Read off the component with Aura applied (dev page, `?theme=aura:light`):
+
+```
+--vaadin-input-field-background        (unset)
+--vaadin-input-field-border-color      (unset)
+--vaadin-input-field-border-width      (unset)
+--vaadin-input-field-value-font-size   (unset)
+--vaadin-input-field-readonly-border   (unset)
+--vaadin-radius-s                      min(0.25lh, round(3 * 1px + 2px, 1px))   ← set
+```
+
+…while `<vaadin-input-container>`'s real background is `oklab(1 0 0 / 0.7)`.
+
+**The themes style `::part(input-field)` directly and publish only *primitives*.** The
+component-level `--vaadin-input-field-*` names are consumed-with-fallback inside `field-base`;
+they are not a token surface a third-party component can read. Our cells therefore run on
+fallbacks, which is why they render transparent in both themes where the mockup expected Lumo
+to fill them.
+
+**What does work**, measured the same way: derivation through *primitives*. Identical CSS
+yields radius 3px (Lumo) vs 5px (Aura), font 16px vs 14px, cells 31×18 vs 26×22, with no
+theme-specific rules — and in Aura the field matches `<vaadin-text-field>` exactly at 82px.
+
+So `W-8`'s real choice is: derive from primitives where possible, and for anything a theme
+applies by styling a part rather than setting a token, either match what it does to
+`::part(input-field)` or accept a `ThemeDetectionMixin` rule. §9.1 wanted to avoid the latter;
+it now has a measured reason to allow it. Tracked as issue #26.
 
 ### 9.1.1 Per-state cell treatment
 
@@ -764,9 +814,24 @@ iOS suppresses the editing menu for inputs it considers non-visible, which kills
 long-press → Paste. The input keeps `opacity: 1` and is hidden via transparent `color`,
 `-webkit-text-fill-color`, `caret-color`, `background` and `::selection`.
 
-### 11.2 `::selection` needs two declarations
+### 11.2 `::selection` needs two declarations — and cannot live in the shadow
 `background: transparent` alone leaves the selected text painted in the highlight's
 foreground colour. Both `background` and `color` must be transparent.
+
+**`::slotted(input)::selection` is not a valid selector.** It is dropped at parse time, so the
+rule appears in the source and does nothing — the selected cell keeps showing the browser's
+highlight band behind the character. `field-base` hits the same wall with `::placeholder`
+("Needed for Safari, where `::slotted(...)::placeholder` does not work") and solves it the
+same way: **`SlotStylesMixin`**, which injects into the light-DOM scope where
+`input::selection` works normally. It arrives with `InputControlMixin`.
+
+Two traps around it:
+
+- **Spread `super.slotStyles`, never replace it.** The base supplies the `:autofill`
+  overrides §11.3 depends on, and a plain override drops them silently.
+- **`getComputedStyle(input, '::selection')` cannot confirm this.** With no `::selection` rule
+  it falls back to the element's own `color`, which §11.12 already made transparent — so it
+  reports success either way. Check that a rule mentioning `selection` actually exists.
 
 ### 11.3 Autofill styling and state
 `:autofill` / `:-webkit-autofill` UA styles outrank most author styles; every property they
@@ -780,6 +845,44 @@ The native selection band, drag handles and the iOS magnifier are sized from the
 from the cells. Publish the input's height via a custom property from a `ResizeObserver` and
 derive the input's `font-size` from it, so native affordances match the field height. The
 input must be out of flow or this observer forms a cycle (§7.9.4).
+
+#### 11.4.1 The horizontal half — text metrics (implemented in `W-5`)
+
+v2 specified only the vertical axis. **§7.3's "native hit testing" does not work without the
+horizontal one**: with the text laid out in a narrow default-font run at the left, every click
+right of it lands past the end and clamps to the last cell. Measured before the fix: clicking
+cell 0 *and* cell 2 both activated cell 5.
+
+The same single `ResizeObserver` publishes three measurements, and the input's
+`letter-spacing` and `padding-inline` follow:
+
+| Published | Why measured, not derived from tokens |
+|---|---|
+| **Cell pitch** (cell 1's left minus cell 0's left) | Needs no knowledge of which token supplies the gap, and a one-cell field has no pitch |
+| **Digit advance** | Not `1ch`: `ch` is the width of "0" without the font's own spacing. Using it left ~2.5px of residual error per cell |
+| **Offset** between the input's box and the first cell | The input's box is the *container's padding box*, so it starts left of the cells by an amount no token states |
+
+**Align character *boundaries* to cell centres, not glyphs to cells.** A caret is a boundary,
+and a click resolves to the nearest one — so centring glyphs puts a centre-click exactly on
+the tie between two boundaries. Chrome rounds down, Firefox up, and Firefox was off by one
+cell. With boundary *i* at cell *i*'s centre, every point inside cell *i* is nearer boundary
+*i* than *i+1* in any engine. The glyphs land half a cell off, which is invisible: §11.12
+makes the input's text transparent and the cells render the characters.
+
+**This is not the JS sizing §7.9 forbids.** The cells still shrink purely in CSS; the observer
+only reports the width they settled on. §7.9.4's cycle cannot form either, because the output
+is consumed only by the input, which is out of flow and so cannot feed back into the cells'
+layout — which is the reason §7.9.4 requires it out of flow.
+
+Two implementation constraints, both found by measuring:
+
+- **The metrics must be applied inline**, not through custom properties in the shadow
+  stylesheet. The input is slotted twice — into this shadow root, then into
+  `<vaadin-input-container>`'s — so the container's own `::slotted(input)` rules win the
+  cascade for `padding` and `letter-spacing`.
+- **Copy the cell's font properties individually.** `getComputedStyle(cell).font` serialises
+  to `""` when `font-variant-numeric` is not `normal`, so the shorthand silently yields
+  nothing and the advance is measured against the wrong font.
 
 ### 11.5 iOS native selection artefact
 iOS paints selection in a native layer that ignores `::selection`, CSS opacity and ancestor
