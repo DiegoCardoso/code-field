@@ -326,7 +326,9 @@ class CodeFieldTest {
         void writesTheSanitisedValueBackToTheBean() {
             // The server model must agree with what the field shows: a bean holding "12-34"
             // while the field shows "1234" is §6.5's silent divergence.
-            CodeField field = new CodeField();
+            // Length 4, so "1234" is complete: since F-3, Binder rightly refuses to write a
+            // partial (invalid) code to the bean.
+            CodeField field = new CodeField(4);
             field.setAllowedCharPattern("[0-9]");
             Binder<Bean> binder = new Binder<>(Bean.class);
             binder.forField(field).bind(Bean::getCode, Bean::setCode);
@@ -341,7 +343,7 @@ class CodeFieldTest {
 
         @Test
         void writesAClientValueToTheBean() {
-            CodeField field = new CodeField();
+            CodeField field = new CodeField(4);
             Binder<Bean> binder = new Binder<>(Bean.class);
             binder.forField(field).bind(Bean::getCode, Bean::setCode);
             Bean bean = new Bean();
