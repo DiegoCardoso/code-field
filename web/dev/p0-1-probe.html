@@ -1,0 +1,1137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>P0-1 probe</title>
+    <!-- Root-absolute, as on the dev page: a relative path 404s when the URL has no
+         trailing slash, and the element silently never registers. -->
+    <script type="module" src="/web/dev/common.js"></script>
+    <script type="module" src="/web/src/code-field.js"></script>
+    <!-- Classic and in <head> on purpose: it takes the page's snapshot at
+         DOMContentLoaded, before an extension's content script runs at
+         document_idle. The module below awaits the component first, which can be
+         later than that, and would count an early badge as the page's own. -->
+    <script>
+      window.__probe = { foreign: [], onForeign: null };
+      // Names that 1Password's injected elements have used. Matched on every
+      // tick as well, in case an element was injected before the snapshot or is
+      // reused rather than re-inserted.
+      window.__probe.namedLike = (el) =>
+        /1password|onepassword|\bop-/iu.test(
+          `${el.localName} ${el.id} ${typeof el.className === 'string' ? el.className : ''}`,
+        );
+      window.__probe.isPageNode = (el) =>
+        window.__probe.pageOwn.has(el) ||
+        // Style, script and link elements are never a badge; field-base's
+        // SlotStylesMixin adds a <style> after the snapshot.
+        ['style', 'script', 'link', 'meta'].includes(el.localName) ||
+        el.closest('[data-probe-own]') ||
+        // field-base's own light-DOM children (input, label, helper, error) carry
+        // a slot; an extension's injected element does not.
+        (el.parentElement?.localName === 'dc-code-field' && el.hasAttribute('slot'));
+      document.addEventListener('DOMContentLoaded', () => {
+        if (new URLSearchParams(location.search).get('ignore') === '1') {
+          for (const input of document.querySelectorAll('input[autocomplete="one-time-code"]')) {
+            input.setAttribute('data-1p-ignore', '');
+          }
+        }
+        window.__probe.pageOwn = new WeakSet(document.querySelectorAll('*'));
+        new MutationObserver((records) => {
+          const found = [];
+          for (const record of records) {
+            for (const node of record.addedNodes) {
+              if (node.nodeType !== Node.ELEMENT_NODE || !node.isConnected || window.__probe.isPageNode(node)) continue;
+              found.push(node);
+            }
+          }
+          // Only foreign additions reach the module: its renders write to the
+          // page's own readouts, and reacting to those writes would loop forever.
+          if (found.length) {
+            window.__probe.foreign.push(...found);
+            window.__probe.onForeign?.(found);
+          }
+        }).observe(document.documentElement, { childList: true, subtree: true });
+      });
+    </script>
+    <style>
+      [data-theme$='dark'] {
+        color-scheme: dark;
+      }
+
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 0;
+        padding: 32px;
+        max-width: 1100px;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      h2 {
+        font-size: 16px;
+        margin-top: 40px;
+        border-top: 1px solid #ddd;
+        padding-top: 16px;
+      }
+      code {
+        font-size: 0.92em;
+      }
+      .note {
+        background: #fffbe6;
+        border: 1px solid #e8d98a;
+        border-radius: 6px;
+        padding: 12px 16px;
+        color: #222;
+      }
+      ol.steps li {
+        margin-bottom: 6px;
+      }
+      .row {
+        display: flex;
+        gap: 32px;
+        align-items: flex-start;
+        flex-wrap: wrap;
+        margin: 12px 0;
+      }
+      .target {
+        display: grid;
+        gap: 4px;
+      }
+      .target small {
+        color: #777;
+        font:
+          11px/1.4 ui-monospace,
+          monospace;
+      }
+      .bare {
+        box-sizing: border-box;
+        height: 36px;
+        padding: 0 8px;
+        border: 1px solid #999;
+        border-radius: 4px;
+        font: inherit;
+      }
+      .controls {
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin: 12px 0;
+      }
+      .mono,
+      #log,
+      #badges,
+      #lab-readout {
+        font:
+          12px/1.6 ui-monospace,
+          monospace;
+      }
+      #log,
+      #badges,
+      #lab-readout {
+        background: #f6f7f9;
+        color: #222;
+        border-radius: 6px;
+        padding: 12px 16px;
+        white-space: pre-wrap;
+        max-height: 320px;
+        overflow: auto;
+      }
+      #log {
+        min-height: 120px;
+      }
+      .silent {
+        color: #b00020;
+        font-weight: bold;
+      }
+      form#results {
+        display: grid;
+        grid-template-columns: max-content minmax(0, 520px);
+        gap: 6px 16px;
+        align-items: center;
+      }
+      form#results label {
+        color: #444;
+      }
+      form#results textarea {
+        min-height: 60px;
+      }
+      [data-theme$='dark'] .note,
+      [data-theme$='dark'] #log,
+      [data-theme$='dark'] #badges,
+      [data-theme$='dark'] #lab-readout {
+        background: #23262b;
+        color: #ddd;
+        border-color: #555;
+      }
+      [data-theme$='dark'] form#results label {
+        color: #bbb;
+      }
+
+      /* ---- The widen-and-clip lab (PLAN P0-1 step 6, SPEC §11.6). ----
+         Light-DOM rules on the slotted input beat the shadow root's ::slotted()
+         ones, so the lab can override width and clipping without touching the
+         component. The overhang is on the right: the cells run left to right in
+         every direction (§7.9.5). */
+      #lab-field {
+        --probe-widen: 0px;
+      }
+      #lab-field > input[slot='input'] {
+        width: calc(100% + var(--probe-widen)) !important;
+      }
+      #lab-field[data-outline] > input[slot='input'] {
+        outline: 1px dashed #d33 !important;
+        outline-offset: -1px;
+      }
+      #lab-field[data-clip='clip-path'] > input[slot='input'] {
+        clip-path: inset(0 var(--probe-widen) 0 0);
+      }
+      #lab-field[data-clip='overflow-hidden']::part(input-field) {
+        overflow: hidden;
+      }
+      #lab-field[data-clip='overflow-clip']::part(input-field) {
+        overflow: clip;
+        overflow-clip-margin: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>P0-1 probe: 1Password on Chrome</h1>
+
+    <p class="note">
+      This page measures the 1Password badge and its one-time-code fill (PLAN.md <code>P0-1</code>, SPEC §11.6 and
+      §7.5). The page logs events and badge geometry automatically. You fill in the rest in
+      <a href="#record">Record</a>, then copy it as Markdown. Use the <strong>Base</strong> theme unless a step says
+      otherwise.
+    </p>
+
+    <h2>Steps</h2>
+    <ol class="steps">
+      <li>
+        In 1Password, create a Login item named <code>code-field probe</code>. Set the website to
+        <code id="origin">this page's origin</code>, the username to <code>probe</code>, and any password.
+      </li>
+      <li>
+        In that item, add a <strong>One-Time Password</strong> field with the secret <code>JBSWY3DPEHPK3PXP</code>. This
+        is a public test secret, not a real account.
+      </li>
+      <li>
+        Press <em>Reset the run</em> under the targets, so nothing from an earlier visit in this tab is kept. Leave the
+        1Password extension unlocked and keep autofill on.
+      </li>
+      <li>
+        <strong>Badge.</strong> Focus each field in <a href="#targets">Targets</a>, one at a time. For each badge that
+        appears, read its entry in <a href="#badge-log">Badges</a>: its size and its offsets from the input's and the
+        host's right edges. The log keeps the last geometry it saw, so the badge can disappear when you move on. Step 9
+        tells which edge it anchors to.
+      </li>
+      <li>
+        If <a href="#badge-log">Badges</a> stays empty or shows a 0×0 size, measure by hand. Point at the badge's
+        top-left corner and press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd>. Then point at its bottom-right corner
+        and press it again. Stop the pointer just outside each corner: over an iframe the page sees no pointer moves,
+        and the reading is stale. As a cross-check, <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>4</kbd> shows pixel sizes as
+        you drag. If the badge's parent is <code>dc-code-field</code> or <code>probe-shadow-host</code> and its size is
+        0×0, it is not rendered at all: record that, because it is a finding about the component.
+      </li>
+      <li>
+        <strong>Resize.</strong> Press <em>Toggle width</em> under each target, and also resize the window. Record if
+        the badge moves with the input. The badge log notes every move.
+      </li>
+      <li>
+        <strong>Fill.</strong> In each target, open the 1Password menu and fill the one-time password. Don't type in the
+        field during the fill. In <a href="#events">Events</a>, check that the value arrived, which events fired, and
+        their <code>isTrusted</code> and <code>inputType</code>. The page marks an event <code>FILL</code> when no key
+        or paste came just before it. Only those count in <em>Fill events</em>. A red
+        <span class="silent">SILENT</span> line means the value changed with no <code>input</code> event, so SPEC §7.5
+        needs polling.
+      </li>
+      <li>
+        <strong>Save login.</strong> Type a code by hand and blur. Record if 1Password offers to save or update a login.
+        Then add <code>ignore=1</code> to the URL's query (<code>?ignore=1</code>, or <code>&amp;ignore=1</code> after
+        <code>?theme=…</code>), reload, repeat, and record if the offer stops. Also record if fill still works with it
+        on. Use the URL, not <em>Toggle data-1p-ignore</em>, for the answer: 1Password may read the attribute only when
+        it first scans the page.
+      </li>
+      <li>
+        <strong>Clip.</strong> Turn <em>Toggle width</em> off first. In <a href="#lab">Widen and clip</a>, raise the
+        widen value until the readout says the badge clears the last cell. Click into the lab field again after each
+        change, so the badge comes back. Compare the two offsets in the readout as the widen grows: the one that stays
+        constant is the edge the badge anchors to. Then try each clip strategy. For each one, press
+        <em>Fill 123456</em>, click the first cell, then click the last cell. The readout must show <code>[5, 6]</code>.
+        Repeat with <em>Fill 12345</em>: the last click must show <code>[5, 5]</code>. Also click just right of the last
+        cell, in the overhang, and record what the readout says it hit. Uncheck <em>Outline the input</em>, Tab in, and
+        look for a clipped focus ring on the active cell.
+      </li>
+      <li>
+        Repeat the badge and clip checks once in Lumo and once in Aura, with the switcher at the bottom right. Switching
+        reloads the page. The record and the logs survive the reload, in this tab only, and each log line notes the
+        theme it was taken in.
+      </li>
+      <li
+        >Fill in <a href="#record">Record</a>, press <em>Copy as Markdown</em>, and paste the result into the chat.</li
+      >
+    </ol>
+
+    <h2 id="targets">Targets</h2>
+    <p>
+      Three places an input can live. The first two are the controls from PLAN.md <code>P0-1</code> step 1. The third is
+      the real component.
+    </p>
+
+    <h3>A. Bare light-DOM input</h3>
+    <div class="row" data-group="bare">
+      <div class="target">
+        <input
+          class="bare probe-input"
+          style="width: 120px"
+          autocomplete="one-time-code"
+          inputmode="numeric"
+          name="otp-a120"
+          data-probe="A 120px"
+        />
+        <small>A 120px</small>
+      </div>
+      <div class="target">
+        <input
+          class="bare probe-input"
+          style="width: 240px"
+          autocomplete="one-time-code"
+          inputmode="numeric"
+          name="otp-a240"
+          data-probe="A 240px"
+        />
+        <small>A 240px</small>
+      </div>
+      <div class="target">
+        <input
+          class="bare probe-input"
+          style="width: 360px"
+          autocomplete="one-time-code"
+          inputmode="numeric"
+          name="otp-a360"
+          data-probe="A 360px"
+        />
+        <small>A 360px</small>
+      </div>
+    </div>
+
+    <h3>B. Input slotted into a shadow root (SPEC §5)</h3>
+    <div class="row" data-group="shadow">
+      <div class="target">
+        <probe-shadow-host style="width: 120px">
+          <input
+            slot="input"
+            class="probe-input"
+            autocomplete="one-time-code"
+            inputmode="numeric"
+            name="otp-b120"
+            data-probe="B 120px"
+          />
+        </probe-shadow-host>
+        <small>B 120px</small>
+      </div>
+      <div class="target">
+        <probe-shadow-host style="width: 240px">
+          <input
+            slot="input"
+            class="probe-input"
+            autocomplete="one-time-code"
+            inputmode="numeric"
+            name="otp-b240"
+            data-probe="B 240px"
+          />
+        </probe-shadow-host>
+        <small>B 240px</small>
+      </div>
+      <div class="target">
+        <probe-shadow-host style="width: 360px">
+          <input
+            slot="input"
+            class="probe-input"
+            autocomplete="one-time-code"
+            inputmode="numeric"
+            name="otp-b360"
+            data-probe="B 360px"
+          />
+        </probe-shadow-host>
+        <small>B 360px</small>
+      </div>
+    </div>
+
+    <h3>C. <code>&lt;dc-code-field one-time-code&gt;</code></h3>
+    <div class="row" data-group="field">
+      <div class="target">
+        <dc-code-field one-time-code label="Code" data-probe="C length 4" length="4"></dc-code-field>
+        <small>C length 4</small>
+      </div>
+      <div class="target">
+        <dc-code-field one-time-code label="Code" data-probe="C length 6"></dc-code-field>
+        <small>C length 6</small>
+      </div>
+      <div class="target">
+        <dc-code-field one-time-code label="Code" data-probe="C length 8" length="8"></dc-code-field>
+        <small>C length 8</small>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button type="button" id="toggle-width">Toggle width</button>
+      <button type="button" id="toggle-ignore">Toggle data-1p-ignore</button>
+      <span class="mono" id="ignore-state">data-1p-ignore: off</span>
+      <button type="button" id="clear-all">Clear all</button>
+      <button type="button" id="reset-run">Reset the run</button>
+    </div>
+
+    <h2 id="lab">Widen and clip (C, length 6)</h2>
+    <p>
+      SPEC §11.6 widens the input past the last cell, so the badge anchors outside the cell row, and clips the overhang
+      back. This lab applies both from the page, without changing the component.
+    </p>
+    <div class="controls">
+      <label
+        >Widen <input type="number" id="widen" value="0" min="0" max="120" step="2" style="width: 64px" /> px</label
+      >
+      <label>
+        Clip
+        <select id="clip">
+          <option value="none">none</option>
+          <option value="clip-path">clip-path on the input</option>
+          <option value="overflow-hidden">overflow: hidden on the container</option>
+          <option value="overflow-clip">overflow: clip + 4px clip margin on the container</option>
+        </select>
+      </label>
+      <label><input type="checkbox" id="outline" checked /> Outline the input</label>
+      <button type="button" id="lab-fill">Fill 123456</button>
+      <button type="button" id="lab-fill-partial">Fill 12345</button>
+      <button type="button" id="lab-clear">Clear</button>
+    </div>
+    <dc-code-field id="lab-field" one-time-code label="Lab" data-probe="Lab" data-outline></dc-code-field>
+    <div id="lab-readout" data-probe-own>(focus the field, or wait for a badge)</div>
+
+    <h2 id="badge-log">Badges</h2>
+    <p>
+      Every element that something other than this page adds to the document. 1Password's badge should appear here. Each
+      entry gives its size, its parent, and its offset from the nearest probe input.
+    </p>
+    <div id="badges" data-probe-own>(none yet)</div>
+
+    <h2 id="events">Events</h2>
+    <p>
+      Listens on the document, in the capture phase, so it sees each event before any component handler. Newest first.
+    </p>
+    <div class="controls"><button type="button" id="clear-log">Clear log</button></div>
+    <div id="log" data-probe-own>(no events yet)</div>
+
+    <h2 id="record">Record</h2>
+    <form id="results" data-probe-own>
+      <label for="r-versions">Chrome / 1Password</label>
+      <input id="r-versions" placeholder="Chrome version / 1Password version" />
+
+      <label for="r-badge">Badge size (W×H)</label>
+      <input id="r-badge" placeholder="filled from the badge log" />
+
+      <label for="r-anchor">Anchors to</label>
+      <select id="r-anchor">
+        <option value="">—</option>
+        <option>the input's box</option>
+        <option>the field (host)</option>
+        <option>something else (see notes)</option>
+      </select>
+
+      <label for="r-offset">Offset from the input's right edge</label>
+      <input id="r-offset" placeholder="filled from the badge log" />
+
+      <label for="r-resize">Repositions on resize</label>
+      <select id="r-resize">
+        <option value="">—</option>
+        <option>yes</option>
+        <option>no</option>
+        <option>only after refocus</option>
+      </select>
+
+      <label for="r-fill-a">TOTP fill: A bare</label>
+      <select id="r-fill-a"></select>
+      <label for="r-fill-b">TOTP fill: B slotted</label>
+      <select id="r-fill-b"></select>
+      <label for="r-fill-c">TOTP fill: C component</label>
+      <select id="r-fill-c"></select>
+
+      <label for="r-events">Fill events</label>
+      <input id="r-events" placeholder="filled from the event log" />
+
+      <label for="r-silent">Needs polling (§7.5)</label>
+      <select id="r-silent">
+        <option value="">—</option>
+        <option>no: every fill fired input</option>
+        <option>yes: a SILENT change was seen</option>
+      </select>
+
+      <label for="r-complete">C fires code-complete on fill</label>
+      <select id="r-complete">
+        <option value="">—</option>
+        <option>yes</option>
+        <option>no</option>
+      </select>
+
+      <label for="r-save">Offers to save a login</label>
+      <select id="r-save">
+        <option value="">—</option>
+        <option>no</option>
+        <option>yes</option>
+      </select>
+
+      <label for="r-ignore">data-1p-ignore stops the offer / still fills</label>
+      <input id="r-ignore" placeholder="e.g. stops it / fill also stops" />
+
+      <label for="r-widen">Widen that clears the badge</label>
+      <input id="r-widen" placeholder="px, from the lab readout" />
+
+      <label for="r-clip-path">clip-path: last cell, overhang, ring</label>
+      <input id="r-clip-path" placeholder="e.g. [5, 6] and [5, 5] / overhang ignored / ring intact" />
+      <label for="r-overflow-hidden">overflow hidden: last cell, overhang, ring</label>
+      <input id="r-overflow-hidden" placeholder="e.g. [5, 6] and [5, 5] / overhang ignored / ring clipped" />
+      <label for="r-overflow-clip">overflow clip: last cell, overhang, ring</label>
+      <input id="r-overflow-clip" placeholder="e.g. [5, 6] and [5, 5] / overhang ignored / ring intact" />
+
+      <label for="r-themes">Same in Lumo and Aura</label>
+      <input id="r-themes" placeholder="yes, or what differed" />
+
+      <label for="r-notes">Notes</label>
+      <textarea id="r-notes"></textarea>
+
+      <span></span>
+      <div class="controls">
+        <button type="button" id="copy">Copy as Markdown</button>
+        <span class="mono" id="copy-state"></span>
+      </div>
+    </form>
+
+    <script type="module">
+      document.querySelector('#origin').textContent = location.origin;
+      const theme = document.documentElement.dataset.theme ?? 'base:light';
+
+      // ---- B: a shadow host with a slotted light-DOM input, like the component. ----
+      customElements.define(
+        'probe-shadow-host',
+        class extends HTMLElement {
+          constructor() {
+            super();
+            this.attachShadow({ mode: 'open' }).innerHTML = `
+              <style>
+                :host { display: block; }
+                .box {
+                  position: relative;
+                  box-sizing: border-box;
+                  height: 36px;
+                  border: 1px solid #999;
+                  border-radius: 4px;
+                }
+                ::slotted(input) {
+                  position: absolute;
+                  inset: 0;
+                  width: 100%;
+                  box-sizing: border-box;
+                  border: 0;
+                  padding: 0 8px;
+                  background: transparent;
+                  font: inherit;
+                }
+              </style>
+              <div class="box"><slot name="input"></slot></div>`;
+          }
+        },
+      );
+
+      // ---- Persistence. The theme switcher reloads the page; a run spans three
+      // themes, so the record and the logs live in sessionStorage. ----
+      const STORE = 'p0-1-probe';
+      const stored = (() => {
+        try {
+          return JSON.parse(sessionStorage.getItem(STORE)) ?? {};
+        } catch {
+          return {};
+        }
+      })();
+      const state = {
+        lines: stored.lines ?? [],
+        keyLines: stored.keyLines ?? [],
+        history: stored.history ?? [],
+        form: stored.form ?? {},
+        touched: stored.touched ?? [],
+        fill: stored.fill ?? { input: 0, change: 0, trusted: [], inputTypes: [] },
+        silentSeen: stored.silentSeen ?? false,
+        completedOnFill: stored.completedOnFill ?? false,
+      };
+      const save = () => {
+        try {
+          sessionStorage.setItem(STORE, JSON.stringify(state));
+        } catch {
+          // Private mode or a full quota: the run still works, it just won't
+          // survive a reload.
+        }
+      };
+
+      // ---- Record. ----
+      const fillOptions = ['', 'yes, value arrived', 'no fill offered', 'offered, value did not arrive'];
+      for (const id of ['#r-fill-a', '#r-fill-b', '#r-fill-c']) {
+        document.querySelector(id).replaceChildren(
+          ...fillOptions.map((text) => {
+            const option = document.createElement('option');
+            option.textContent = text || '—';
+            option.value = text;
+            return option;
+          }),
+        );
+      }
+
+      // Measured values fill a field until the person edits it; then theirs wins.
+      const form = document.querySelector('#results');
+      const touched = new Set(state.touched);
+      for (const [id, value] of Object.entries(state.form)) {
+        const el = document.getElementById(id);
+        if (el) el.value = value;
+      }
+      const saveForm = () => {
+        state.form = Object.fromEntries(
+          [...form.querySelectorAll('input, select, textarea')].map((el) => [el.id, el.value]),
+        );
+        state.touched = [...touched];
+        save();
+      };
+      form.addEventListener('input', (e) => {
+        touched.add(e.target.id);
+        saveForm();
+      });
+      function prefill(selector, value) {
+        const el = document.querySelector(selector);
+        if (touched.has(el.id) || el.value === value) return;
+        el.value = value;
+        saveForm();
+      }
+
+      await customElements.whenDefined('dc-code-field');
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+      const fields = [...document.querySelectorAll('dc-code-field')];
+      await Promise.all(fields.map((field) => field.updateComplete));
+
+      // Each probe input, with the label it is logged under. A component's input is
+      // the one field-base slots into it.
+      const probes = new Map();
+      for (const input of document.querySelectorAll('input.probe-input')) {
+        probes.set(input, input.dataset.probe);
+      }
+      for (const field of fields) {
+        probes.set(field.querySelector(':scope > input[slot="input"]'), field.dataset.probe);
+      }
+      // The host is the element a badge could anchor to instead of the input.
+      const ownerOf = (input) =>
+        ['dc-code-field', 'probe-shadow-host'].includes(input.parentElement?.localName) ? input.parentElement : input;
+
+      const time = () => new Date().toISOString().slice(11, 23);
+      const px = (n) => `${Math.round(n * 10) / 10}`;
+      const rectText = (r) => `${px(r.width)}×${px(r.height)} at (${px(r.left)}, ${px(r.top)})`;
+
+      // ---- Logs. The full log is capped; the key log (fills, SILENT, badges,
+      // clicks, measurements) is what the export keeps whole. ----
+      const log = document.querySelector('#log');
+      const renderLog = () => {
+        if (!state.lines.length) {
+          log.textContent = '(no events yet)';
+          return;
+        }
+        log.replaceChildren(
+          ...state.lines.map(({ text, cls }) => {
+            const div = document.createElement('div');
+            div.textContent = text;
+            if (cls) div.className = cls;
+            return div;
+          }),
+        );
+      };
+      const write = (text, { cls, key = false } = {}) => {
+        const line = `${time()}  ${theme.padEnd(10)}  ${text}`;
+        state.lines.unshift({ text: line, cls });
+        state.lines.length = Math.min(state.lines.length, 300);
+        if (key) {
+          state.keyLines.unshift(line);
+          state.keyLines.length = Math.min(state.keyLines.length, 1000);
+        }
+        renderLog();
+        save();
+      };
+      document.querySelector('#clear-log').addEventListener('click', () => {
+        state.lines = [];
+        renderLog();
+        save();
+      });
+      document.querySelector('#reset-run').addEventListener('click', () => {
+        try {
+          sessionStorage.removeItem(STORE);
+        } catch {
+          // Nothing stored.
+        }
+        location.reload();
+      });
+
+      // ---- Events (PLAN P0-1 step 4). ----
+      // The last value each input reached through an input or change event. A
+      // value that changes with no such event is a fill only polling can see
+      // (SPEC §7.5). Focus, blur and keys do not count: a filler that focuses and
+      // then writes silently must still be caught.
+      const seen = new Map([...probes.keys()].map((input) => [input, input.value]));
+      // For 200ms after an input or change event, the poller leaves the input
+      // alone, so the component's own rewrite after it (a handler, a Lit update)
+      // does not read as a silent fill.
+      const lastEvent = new Map();
+      const settle = (input) => {
+        lastEvent.set(input, performance.now());
+        seen.set(input, input.value);
+        setTimeout(() => seen.set(input, input.value), 200);
+      };
+
+      // Typed or filled. An input event within 150ms of a key or paste on the
+      // same input is the user's; anything else is a candidate fill.
+      const lastManual = new Map();
+      const lastKind = new Map();
+
+      for (const type of ['focus', 'blur', 'keydown', 'beforeinput', 'input', 'change', 'paste']) {
+        document.addEventListener(
+          type,
+          (event) => {
+            const input = event.target;
+            if (!probes.has(input)) return;
+            // Trusted only: a filler may dispatch synthetic keys around its write.
+            if ((type === 'keydown' || type === 'paste') && event.isTrusted) lastManual.set(input, performance.now());
+
+            let kind = '';
+            if (type === 'input') {
+              kind = performance.now() - (lastManual.get(input) ?? -Infinity) < 150 ? 'typed' : 'FILL';
+              lastKind.set(input, kind);
+            } else if (type === 'change') {
+              kind = lastKind.get(input) ?? 'FILL';
+            }
+
+            const parts = [`[${probes.get(input)}]`, type];
+            if (kind) parts.push(kind);
+            parts.push(`isTrusted=${event.isTrusted}`);
+            if ('inputType' in event) parts.push(`inputType=${event.inputType || '""'}`);
+            if (event.data != null) parts.push(`data=${JSON.stringify(event.data)}`);
+            if (type === 'keydown') parts.push(`key=${JSON.stringify(event.key)}`);
+            parts.push(`value=${JSON.stringify(input.value)}`);
+            if (input.matches(':autofill')) parts.push(':autofill');
+            write(parts.join('  '), { key: kind === 'FILL' });
+
+            if (kind === 'FILL') {
+              state.fill[type] += 1;
+              if (!state.fill.trusted.includes(String(event.isTrusted)))
+                state.fill.trusted.push(String(event.isTrusted));
+              if (event.inputType && !state.fill.inputTypes.includes(event.inputType)) {
+                state.fill.inputTypes.push(event.inputType);
+              }
+              save();
+            }
+            if (type === 'input' || type === 'change') settle(input);
+          },
+          true,
+        );
+      }
+
+      for (const field of fields) {
+        field.addEventListener('code-complete', (event) => {
+          const input = field.querySelector(':scope > input[slot="input"]');
+          const kind = lastKind.get(input) ?? 'programmatic';
+          write(`[${field.dataset.probe}]  code-complete  after ${kind}  ${JSON.stringify(event.detail)}`, {
+            key: true,
+          });
+          if (kind === 'FILL') {
+            state.completedOnFill = true;
+            save();
+          }
+        });
+      }
+
+      setInterval(() => {
+        for (const [input, label] of probes) {
+          if (performance.now() - (lastEvent.get(input) ?? -Infinity) < 200) continue;
+          if (input.value !== seen.get(input)) {
+            write(
+              `[${label}]  SILENT  value ${JSON.stringify(seen.get(input))} -> ${JSON.stringify(input.value)} with no input event`,
+              { cls: 'silent', key: true },
+            );
+            seen.set(input, input.value);
+            state.silentSeen = true;
+            save();
+          }
+        }
+      }, 100);
+
+      // ---- Badges (PLAN P0-1 step 3). ----
+      const badges = new Map(); // element -> last rect text, for move detection
+      const badgeOut = document.querySelector('#badges');
+      const historyOf = new Map(); // element -> index into state.history
+
+      const nearestProbe = (rect) => {
+        let best;
+        for (const input of probes.keys()) {
+          const r = input.getBoundingClientRect();
+          const dx = Math.max(r.left - rect.right, 0, rect.left - r.right);
+          const dy = Math.max(r.top - rect.bottom, 0, rect.top - r.bottom);
+          const d = Math.hypot(dx, dy);
+          if (!best || d < best.d) best = { input, r, d };
+        }
+        return best;
+      };
+
+      const describe = (el, rect) => {
+        const near = nearestProbe(rect);
+        const host = ownerOf(near.input).getBoundingClientRect();
+        const style = getComputedStyle(el);
+        return {
+          tag: el.localName,
+          size: `${px(rect.width)}×${px(rect.height)}`,
+          offset: `left ${px(rect.left - near.r.right)}px, right ${px(rect.right - near.r.right)}px from the input's right edge (${probes.get(near.input)})`,
+          text: [
+            `<${el.localName}> in <${el.parentElement?.localName ?? el.parentNode?.nodeName}>  position=${style.position}  shadow=${el.shadowRoot ? 'open' : 'closed or none'}`,
+            `  rect ${rectText(rect)}`,
+            `  nearest ${probes.get(near.input)}: input ${rectText(near.r)}, host ${rectText(host)}`,
+            `  badge.left - input.right = ${px(rect.left - near.r.right)}  badge.right - input.right = ${px(rect.right - near.r.right)}`,
+            `  badge.right - host.right = ${px(rect.right - host.right)}  badge.top - input.top = ${px(rect.top - near.r.top)}`,
+          ].join('\n'),
+        };
+      };
+
+      // The geometry worth keeping is the last one seen with a size, taken while
+      // the badge was showing. A badge hides on blur, and a later 0×0 reading must
+      // not replace it.
+      const recordBadge = (el) => {
+        const rect = el.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        const entry = { time: time(), theme, ...describe(el, rect) };
+        if (historyOf.has(el)) {
+          state.history[historyOf.get(el)] = entry;
+        } else {
+          historyOf.set(el, state.history.length);
+          state.history.push(entry);
+        }
+        // Badge-sized only. 1Password's open menu is a foreign element too, and
+        // would otherwise overwrite the badge's size with its own.
+        if (rect.width <= 64 && rect.height <= 64) {
+          prefill('#r-badge', `${entry.size} (<${entry.tag}>)`);
+          prefill('#r-offset', entry.offset);
+        }
+        save();
+      };
+
+      const renderBadges = () => {
+        const sections = [];
+        const live = [...badges.keys()].filter((el) => el.isConnected);
+        if (live.length) {
+          sections.push(
+            'Now:\n' +
+              live
+                .map((el) => {
+                  const rect = el.getBoundingClientRect();
+                  return rect.width && rect.height ? describe(el, rect).text : `<${el.localName}>  0×0 now`;
+                })
+                .join('\n'),
+          );
+        }
+        if (state.history.length) {
+          sections.push(
+            'Last seen with a size:\n' +
+              state.history.map((entry) => `${entry.time}  ${entry.theme}\n${entry.text}`).join('\n\n'),
+          );
+        }
+        badgeOut.textContent = sections.join('\n\n') || '(none yet)';
+      };
+
+      const adopt = (els, how) => {
+        for (const el of els) {
+          if (badges.has(el)) continue;
+          badges.set(el, '');
+          write(`badge?  <${el.localName}> in <${el.parentElement?.localName}>  (${how})`, { key: true });
+          recordBadge(el);
+        }
+        renderBadges();
+        renderLab();
+      };
+
+      // Every tick: follow known badges for moves, and match by name in case the
+      // badge existed before the snapshot or is reused rather than re-inserted.
+      setInterval(() => {
+        const named = [...document.querySelectorAll('*')].filter(
+          (el) => !badges.has(el) && !el.closest('[data-probe-own]') && window.__probe.namedLike(el),
+        );
+        if (named.length) adopt(named, 'matched by name');
+
+        for (const el of badges.keys()) {
+          if (!el.isConnected) continue;
+          const key = rectText(el.getBoundingClientRect());
+          if (badges.get(el) && badges.get(el) !== key) {
+            write(`badge moved  <${el.localName}>  ${badges.get(el)} -> ${key}`, { key: true });
+          }
+          badges.set(el, key);
+          recordBadge(el);
+        }
+        renderBadges();
+        renderLab();
+      }, 250);
+
+      // Hand measurement, for a badge whose host reports no size (step 5). Kept in
+      // page coordinates, so the lab can still use it after a scroll.
+      let pointer = { x: 0, y: 0 };
+      let mark;
+      let manualBadge;
+      document.addEventListener('pointermove', (e) => (pointer = { x: e.clientX, y: e.clientY }), true);
+      document.addEventListener(
+        'keydown',
+        (e) => {
+          if (!(e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'm')) return;
+          e.preventDefault();
+          e.stopPropagation();
+          if (!mark) {
+            mark = pointer;
+            write(`measure  first corner at (${px(mark.x)}, ${px(mark.y)}); point at the opposite corner`);
+            return;
+          }
+          const rect = DOMRect.fromRect({
+            x: Math.min(mark.x, pointer.x),
+            y: Math.min(mark.y, pointer.y),
+            width: Math.abs(pointer.x - mark.x),
+            height: Math.abs(pointer.y - mark.y),
+          });
+          const near = nearestProbe(rect);
+          write(
+            `measure  ${px(rect.width)}×${px(rect.height)}  left - input.right = ${px(rect.left - near.r.right)}  right - input.right = ${px(rect.right - near.r.right)}  (${probes.get(near.input)})`,
+            { key: true },
+          );
+          prefill('#r-badge', `${px(rect.width)}×${px(rect.height)} (measured by hand)`);
+          prefill(
+            '#r-offset',
+            `left ${px(rect.left - near.r.right)}px, right ${px(rect.right - near.r.right)}px from the input's right edge (${probes.get(near.input)}, by hand)`,
+          );
+          // The lab uses a measurement only when it was taken at the lab.
+          if (near.input === labInput) {
+            manualBadge = { x: rect.x + scrollX, y: rect.y + scrollY, width: rect.width, height: rect.height };
+          }
+          mark = undefined;
+          renderLab();
+        },
+        true,
+      );
+
+      // ---- Controls. ----
+      const lab = document.querySelector('#lab-field');
+      let wide = false;
+      document.querySelector('#toggle-width').addEventListener('click', () => {
+        wide = !wide;
+        for (const el of document.querySelectorAll('.bare, probe-shadow-host')) {
+          const base = parseInt(el.dataset.width ?? (el.dataset.width = parseInt(el.style.width, 10)), 10);
+          el.style.width = `${wide ? base + 80 : base}px`;
+        }
+        // Not the lab: a wider field leaves room past the last cell, and the lab
+        // would report a badge as clear at no widen at all.
+        for (const field of fields) if (field !== lab) field.style.width = wide ? '480px' : '';
+        write(`toggle width  ${wide ? 'wide (+80px, fields 480px)' : 'original'}`, { key: true });
+      });
+
+      const ignoreState = document.querySelector('#ignore-state');
+      const showIgnore = () =>
+        (ignoreState.textContent = `data-1p-ignore: ${[...probes.keys()][0].hasAttribute('data-1p-ignore') ? 'on' : 'off'}`);
+      showIgnore();
+      document.querySelector('#toggle-ignore').addEventListener('click', () => {
+        const on = ![...probes.keys()][0].hasAttribute('data-1p-ignore');
+        for (const input of probes.keys()) input.toggleAttribute('data-1p-ignore', on);
+        showIgnore();
+        write(`data-1p-ignore  ${on ? 'on' : 'off'} (toggled at runtime)`, { key: true });
+      });
+
+      document.querySelector('#clear-all').addEventListener('click', () => {
+        for (const input of document.querySelectorAll('input.probe-input')) input.value = '';
+        for (const field of fields) field.value = '';
+        for (const input of probes.keys()) settle(input);
+      });
+
+      // ---- The lab (step 9). ----
+      const labInput = lab.querySelector(':scope > input[slot="input"]');
+      const labOut = document.querySelector('#lab-readout');
+      const widen = document.querySelector('#widen');
+      const clip = document.querySelector('#clip');
+      let lastClick = '(none yet)';
+
+      const applyLab = () => {
+        lab.style.setProperty('--probe-widen', `${Number(widen.value) || 0}px`);
+        lab.dataset.clip = clip.value;
+        lab.toggleAttribute('data-outline', document.querySelector('#outline').checked);
+        write(`lab  widen=${widen.value}px  clip=${clip.value}`);
+        renderLab();
+      };
+      widen.addEventListener('input', applyLab);
+      clip.addEventListener('change', applyLab);
+      document.querySelector('#outline').addEventListener('change', applyLab);
+      for (const [id, value] of [
+        ['#lab-fill', '123456'],
+        ['#lab-fill-partial', '12345'],
+        ['#lab-clear', ''],
+      ]) {
+        document.querySelector(id).addEventListener('click', () => {
+          lab.value = value;
+          lastKind.set(labInput, 'programmatic');
+          settle(labInput);
+        });
+      }
+
+      // Caret resolution at the last cell, and what a click in the overhang hits.
+      // On the document, not the field: a clip that works stops an overhang click
+      // from reaching the field at all.
+      document.addEventListener('pointerup', (event) => {
+        const box = labInput.getBoundingClientRect();
+        const host = lab.getBoundingClientRect();
+        const { clientX: x, clientY: y } = event;
+        const inside = (r) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+        if (!inside(box) && !inside(host)) return;
+
+        const cells = [...lab.shadowRoot.querySelectorAll('[part~="cell"]')];
+        const last = cells.at(-1).getBoundingClientRect();
+        // Every point in a cell resolves to that cell's boundary (#publishCellMetrics),
+        // so the whole last cell selects it on a full code and lands on the append
+        // position on a partial one.
+        const full = labInput.value.length >= lab.length;
+        const where =
+          x < last.left
+            ? 'before the last cell'
+            : x > last.right
+              ? 'the overhang, right of the last cell'
+              : `the last cell (expect ${full ? `[${lab.length - 1}, ${lab.length}]` : `[${lab.length - 1}, ${lab.length - 1}]`})`;
+        const hit = document.elementFromPoint(x, y);
+        setTimeout(() => {
+          const focused = document.activeElement === labInput;
+          lastClick = `${where}: hit <${hit?.localName}>, ${
+            focused ? `selection [${labInput.selectionStart}, ${labInput.selectionEnd}]` : 'field not focused'
+          }`;
+          write(`lab click  ${lastClick}  clip=${clip.value}  widen=${widen.value}px`, { key: true });
+          renderLab();
+        }, 50);
+      });
+
+      function renderLab() {
+        const cells = [...lab.shadowRoot.querySelectorAll('[part~="cell"]')];
+        if (!cells.length) return;
+        const last = cells.at(-1).getBoundingClientRect();
+        const input = labInput.getBoundingClientRect();
+        const host = lab.getBoundingClientRect();
+        const near = [...badges.keys()]
+          .filter((el) => el.isConnected)
+          .map((el) => el.getBoundingClientRect())
+          .filter((rect) => rect.width && rect.height && nearestProbe(rect).input === labInput);
+        let badge = near[0];
+        let source = 'live';
+        if (!badge && manualBadge) {
+          badge = DOMRect.fromRect({ ...manualBadge, x: manualBadge.x - scrollX, y: manualBadge.y - scrollY });
+          source = 'measured by hand';
+        }
+
+        const report = [
+          `widen ${widen.value}px  clip ${clip.value}${lab.style.width ? '  (lab width overridden)' : ''}`,
+          `input     ${rectText(input)}`,
+          `host      ${rectText(host)}`,
+          `last cell ${rectText(last)}`,
+          `last click ${lastClick}`,
+        ];
+        if (badge) {
+          const clearance = badge.left - last.right;
+          report.push(`badge     ${rectText(badge)} (${source})`);
+          report.push(
+            `          badge.right - input.right = ${px(badge.right - input.right)}  badge.right - host.right = ${px(badge.right - host.right)}`,
+          );
+          // Assumes the badge moves 1:1 with the input's right edge, which the two
+          // offsets above confirm or refute; the 4px is margin, not a measurement.
+          report.push(
+            clearance >= 0
+              ? `badge clears the last cell by ${px(clearance)}px`
+              : `badge overlaps the last cell by ${px(-clearance)}px: try a widen of ${px(Number(widen.value) - clearance + 4)}px (4px margin)`,
+          );
+          if (clearance >= 0 && source === 'live') {
+            prefill('#r-widen', `${widen.value}px clears it by ${px(clearance)}px`);
+          }
+        } else {
+          report.push('badge     (none near the lab field; click into it)');
+        }
+        labOut.textContent = report.join('\n');
+      }
+
+      const brand = navigator.userAgentData?.brands?.find((b) => /Chrome/u.test(b.brand));
+      prefill('#r-versions', `Chrome ${brand?.version ?? '?'} / 1Password ?`);
+
+      document.querySelector('#copy').addEventListener('click', async () => {
+        const { fill } = state;
+        prefill(
+          '#r-events',
+          `input×${fill.input}, change×${fill.change}, isTrusted ${fill.trusted.join('/') || '?'}, inputType ${fill.inputTypes.join('/') || '?'}`,
+        );
+        if (state.silentSeen) prefill('#r-silent', 'yes: a SILENT change was seen');
+        if (state.completedOnFill) prefill('#r-complete', 'yes');
+
+        const rows = [...form.querySelectorAll('label')].map((label) => {
+          const field = document.getElementById(label.htmlFor);
+          return `| ${label.textContent.trim()} | ${(field.value || '—').replaceAll('|', '\\|').replaceAll('\n', ' ')} |`;
+        });
+        const block = (summary, text) => [
+          `<details><summary>${summary}</summary>`,
+          '',
+          '```',
+          text,
+          '```',
+          '',
+          '</details>',
+          '',
+        ];
+        const markdown = [
+          `### P0-1 probe: 1Password on Chrome (${new Date().toISOString().slice(0, 10)})`,
+          '',
+          `Copied in ${theme}, devicePixelRatio ${devicePixelRatio}, ${navigator.platform}.`,
+          '',
+          '| Check | Result |',
+          '|---|---|',
+          ...rows,
+          '',
+          ...block(
+            'Badges, last seen with a size',
+            state.history.map((entry) => `${entry.time}  ${entry.theme}\n${entry.text}`).join('\n\n') || '(none)',
+          ),
+          ...block('Key events: fills, SILENT, badges, clicks (newest first)', state.keyLines.join('\n') || '(none)'),
+          ...block(
+            'Full event log, last 100 (newest first)',
+            state.lines
+              .slice(0, 100)
+              .map(({ text }) => text)
+              .join('\n') || '(none)',
+          ),
+        ].join('\n');
+
+        const copyState = document.querySelector('#copy-state');
+        try {
+          await navigator.clipboard.writeText(markdown);
+          copyState.textContent = 'Copied.';
+        } catch {
+          copyState.textContent = 'Clipboard blocked: the Markdown is in the console.';
+          console.log(markdown);
+        }
+      });
+
+      renderLog();
+      renderBadges();
+      write(`probe ready  theme=${theme}`, { key: true });
+      renderLab();
+
+      // Last, so everything adopt() calls is initialised: the backlog is whatever
+      // arrived between the snapshot and now.
+      adopt(window.__probe.foreign, 'added after the snapshot');
+      window.__probe.onForeign = (els) => adopt(els, 'added after the snapshot');
+    </script>
+  </body>
+</html>
