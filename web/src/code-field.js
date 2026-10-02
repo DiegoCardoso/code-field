@@ -16,6 +16,9 @@ import { ThemableMixin } from '@vaadin/vaadin-themable-mixin/vaadin-themable-mix
 import { css, html, LitElement } from 'lit';
 import { ifDefined } from 'lit/directives/if-defined.js';
 
+/** `value` as a string: `null` and `undefined` are the empty code. */
+const asText = (value) => (value == null ? '' : String(value));
+
 /**
  * `<dc-code-field>` — a single-value field for short fixed-length codes.
  *
@@ -75,6 +78,9 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
    * (§7.7).
    */
   #committedValue = '';
+
+  /** The value when an IME composition began, or `null` outside one. */
+  #valueBeforeComposition = null;
 
   /** The `errorMessage` this component last wrote from `i18n` (ADR 0002). */
   #i18nErrorMessage = null;
@@ -616,7 +622,7 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
       // only when there is something to commit, as in vaadin-text-field, and
       // validating first so a `change` listener sees the verdict. An Enter that
       // confirms an IME composition is not a commit.
-      if ((this.value || '') !== this.#committedValue) {
+      if (asText(this.value) !== this.#committedValue) {
         this._requestValidation();
         this.#commit();
       }
@@ -670,6 +676,9 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
       // No focus, no active cell: §9 requires the active-cell treatment to mean
       // "this is where typing goes", which is untrue when nothing is focused.
       this._activeCell = -1;
+      // Blur ends the user's composition: it commits here, not again at a late
+      // compositionend.
+      this.#valueBeforeComposition = null;
       // After super, which has validated: a `change` listener sees the verdict.
       this.#commit();
     }
@@ -732,7 +741,7 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
   _onInput(event) {
     this.#sanitiseInputInPlace();
 
-    this.#userEdit(() => super._onInput(event));
+    this.#applyUserEdit(() => super._onInput(event), { composing: event.isComposing });
 
     this.#clampCaretWhenFull();
   }
@@ -748,25 +757,84 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
    *
    * @private
    */
-  #userEdit(apply) {
-    const before = (this.value || '').length;
+  #applyUserEdit(apply, { composing = false } = {}) {
+    const before = asText(this.value);
     const produced = this.inputElement.value || '';
 
+    this.#asUser(produced, apply);
+
+    if (composing) {
+      // An IME composition is not finished until compositionend: completing
+      // on a candidate would verify a code the user has not confirmed.
+      return;
+    }
+
+    // A non-composing edit means no composition is open any more, whether or
+    // not one ended cleanly.
+    this.#valueBeforeComposition = null;
+    this.#completeIfNew(before, produced);
+  }
+
+  /**
+   * Runs `apply` with `produced` marked as the user's value, so the observers
+   * that run inside it treat that value — and only that value — as user input.
+   *
+   * @private
+   */
+  #asUser(produced, apply) {
     this.#userValue = produced;
     try {
       apply();
     } finally {
       this.#userValue = null;
     }
+  }
 
+  /**
+   * Recorded at every start, never carried over: a composition that was
+   * aborted without compositionend must not lend its starting value to the
+   * next one.
+   *
+   * @private
+   */
+  #onCompositionStart = () => {
+    this.#valueBeforeComposition = asText(this.value);
+  };
+
+  /**
+   * Completes the composition's result, if it is still the user's to complete.
+   * The pending start value is discarded by anything that ends the user's
+   * ownership of the edit first — a programmatic set (§11.11) or a blur, which
+   * has already committed — and a field that became disabled or readonly
+   * accepts no completion.
+   *
+   * @private
+   */
+  #onCompositionEnd = () => {
+    const before = this.#valueBeforeComposition;
+    this.#valueBeforeComposition = null;
+    if (before === null || this.disabled || this.readonly) {
+      return;
+    }
+
+    this.#completeIfNew(before, this.inputElement.value || '');
+  };
+
+  /**
+   * §7.6: a user edit to a *new* full value completes the code — from empty,
+   * from partial, or over a different complete code.
+   *
+   * @private
+   */
+  #completeIfNew(before, produced) {
     // Compared against what the user produced, not just its length: a
-    // listener may have replaced it during `apply`.
-    const value = this.value || '';
-    if (before < this.length && value.length === this.length && value === this.#normalise(produced)) {
+    // listener may have replaced it during the edit.
+    const value = asText(this.value);
+    if (value !== before && value.length === this.length && value === this.#normalise(produced)) {
       // §7.7: completion is a commit — unconditionally, even when the code
       // was edited back to the value last committed, so every completion is
       // `value-changed` → `change` → `code-complete` without exception.
-      this.#commit({ force: true });
+      this.#forceCommit();
       this.dispatchEvent(new CustomEvent('code-complete', { detail: { value: this.value } }));
     }
   }
@@ -781,14 +849,42 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
    *
    * @private
    */
-  #commit({ force = false } = {}) {
-    const value = this.value || '';
-    if (!force && value === this.#committedValue) {
-      return;
+  #commit() {
+    if (asText(this.value) !== this.#committedValue) {
+      this.#forceCommit();
     }
+  }
 
-    this.#committedValue = value;
+  /**
+   * Commits whether or not the value differs — completion's case (§7.7).
+   *
+   * @private
+   */
+  #forceCommit() {
+    this.#committedValue = asText(this.value);
     this.dispatchEvent(new CustomEvent('change', { bubbles: true }));
+  }
+
+  /**
+   * @param {!HTMLElement} input
+   * @protected
+   * @override
+   */
+  _addInputListeners(input) {
+    super._addInputListeners(input);
+    input.addEventListener('compositionstart', this.#onCompositionStart);
+    input.addEventListener('compositionend', this.#onCompositionEnd);
+  }
+
+  /**
+   * @param {!HTMLElement} input
+   * @protected
+   * @override
+   */
+  _removeInputListeners(input) {
+    super._removeInputListeners(input);
+    input.removeEventListener('compositionstart', this.#onCompositionStart);
+    input.removeEventListener('compositionend', this.#onCompositionEnd);
   }
 
   /**
@@ -811,7 +907,9 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
    */
   __trackProgrammaticValue(value) {
     if (!this.#isUserValue(value)) {
-      this.#committedValue = value || '';
+      this.#committedValue = asText(value);
+      // The app has overwritten whatever was being composed.
+      this.#valueBeforeComposition = null;
     }
   }
 
@@ -835,16 +933,13 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
       return;
     }
 
-    this.#userValue = restored;
-    try {
+    this.#asUser(restored, () => {
       this.value = restored;
-    } finally {
-      this.#userValue = null;
-    }
+    });
 
     // As the browser would treat it: a restored value is not an edit, so
     // blurring without touching it commits nothing.
-    this.#committedValue = this.value || '';
+    this.#committedValue = asText(this.value);
   }
 
   /**
@@ -945,11 +1040,10 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
     }
 
     const i18n = this.i18n || {};
-    const length = (this.value || '').length;
     let message;
-    if (length > 0 && length < this.length) {
+    if (this.#isPartial()) {
       message = i18n.incompleteErrorMessage;
-    } else if (this.required && length === 0) {
+    } else if (this.#isMissing()) {
       message = i18n.requiredErrorMessage;
     }
 
@@ -974,12 +1068,23 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
    * @override
    */
   checkValidity() {
-    const length = (this.value || '').length;
-    if (length > 0 && length < this.length) {
-      return false;
-    }
+    return !this.#isPartial() && !this.#isMissing();
+  }
 
-    return !(this.required && length === 0);
+  /**
+   * §8's two constraints, each read in one place so the verdict and the message
+   * cannot drift apart.
+   *
+   * @private
+   */
+  #isPartial() {
+    const { length } = asText(this.value);
+    return length > 0 && length < this.length;
+  }
+
+  /** @private */
+  #isMissing() {
+    return this.required && !this.value;
   }
 
   /**
@@ -1041,7 +1146,7 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
       input.setRangeText('', this.length, input.value.length, 'end');
     }
 
-    this.#userEdit(() => {
+    this.#applyUserEdit(() => {
       this.value = input.value;
     });
   }
@@ -1057,7 +1162,7 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
    * @private
    */
   #sanitise(value) {
-    const raw = value == null ? '' : String(value);
+    const raw = asText(value);
     const allowed = this.allowedCharPattern ? new RegExp(`^${this.allowedCharPattern}$`, 'u') : null;
 
     let result = '';
@@ -1088,7 +1193,7 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
       return;
     }
 
-    const current = value == null ? '' : String(value);
+    const current = asText(value);
     const effective = this.#normalise(current, length);
 
     if (effective === current) {
@@ -1124,13 +1229,13 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
       return false;
     }
 
-    const current = value == null ? '' : String(value);
+    const current = asText(value);
     return current === this.#userValue || current === this.#normalise(this.#userValue);
   }
 
   /** @private */
   __updateComplete(value, length) {
-    this._setComplete((value || '').length === length);
+    this._setComplete(asText(value).length === length);
   }
 
   /** @private */
@@ -1167,7 +1272,7 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
    * @private
    */
   #renderCells() {
-    const value = this.value || '';
+    const value = asText(this.value);
 
     return Array.from({ length: this.length }, (_, index) => {
       const active = index === this._activeCell;

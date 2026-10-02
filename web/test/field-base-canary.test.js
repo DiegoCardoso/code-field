@@ -45,6 +45,9 @@ describe('field-base canary', () => {
     _setFocused: 1,
     _requestValidation: 0,
     _constraintsChanged: 1,
+    // W-7: compositionend is attached through these.
+    _addInputListeners: 1,
+    _removeInputListeners: 1,
   };
 
   it('should declare required as a constraint, which §8 extends with length', () => {

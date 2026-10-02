@@ -62,9 +62,9 @@ describe('events', () => {
       expect(spy.secondCall.args[0].detail).to.deep.equal({ value: '1235' });
     });
 
-    it('should not fire when typing over a code that is already complete', async () => {
-      // Overwriting the last cell keeps the length at `length`: no transition,
-      // so no second verification request for a code the user is still fixing.
+    it('should fire when typing over a complete code makes a new one', async () => {
+      // §7.6: completion is any user edit to a *new* full value, so a fixed
+      // last digit is a new code to verify.
       field.focus();
       await sendKeys({ type: '1234' });
       const spy = sinon.spy();
@@ -73,7 +73,133 @@ describe('events', () => {
       await sendKeys({ type: '9' });
 
       expect(field.value).to.equal('1239');
+      expect(spy.calledOnce).to.be.true;
+      expect(spy.firstCall.args[0].detail).to.deep.equal({ value: '1239' });
+    });
+
+    it('should fire when a paste replaces a complete code', async () => {
+      // How a fill into an already-full field arrives — and §7.5 requires a
+      // filled code to behave exactly like a typed one.
+      field.focus();
+      await sendKeys({ type: '1234' });
+      await copy('5678');
+      const spy = sinon.spy();
+      field.addEventListener('code-complete', spy);
+      field.focus();
+
+      await sendKeys({ press: `${MOD}+a` });
+      await sendKeys({ press: `${MOD}+v` });
+
+      expect(field.value).to.equal('5678');
+      expect(spy.calledOnce).to.be.true;
+      expect(spy.firstCall.args[0].detail).to.deep.equal({ value: '5678' });
+    });
+
+    it('should not fire when an edit leaves a complete code unchanged', async () => {
+      field.focus();
+      await sendKeys({ type: '1234' });
+      const spy = sinon.spy();
+      field.addEventListener('code-complete', spy);
+
+      await sendKeys({ type: '4' });
+
+      expect(field.value).to.equal('1234');
       expect(spy.called).to.be.false;
+    });
+
+    // IME composition. Playwright cannot drive a real IME, so these dispatch the
+    // composition and input events directly — a narrower seam than the rest of
+    // this file, agreed for this case only. Each test follows one engine's
+    // event order; the component must handle both.
+    describe('composition', () => {
+      const compose = (type) => field.inputElement.dispatchEvent(new CompositionEvent(type, { bubbles: true }));
+      const inputWhile = (value, isComposing) => {
+        field.inputElement.value = value;
+        field.inputElement.dispatchEvent(new InputEvent('input', { bubbles: true, isComposing }));
+      };
+
+      let spy;
+
+      beforeEach(() => {
+        field.allowedCharPattern = '';
+        spy = sinon.spy();
+        field.addEventListener('code-complete', spy);
+        field.focus();
+      });
+
+      it('should not fire until composition ends (Chromium order)', () => {
+        // Chromium: the last `input` is still composing, then compositionend.
+        compose('compositionstart');
+        inputWhile('12ab', true);
+        expect(spy.called).to.be.false;
+
+        compose('compositionend');
+
+        expect(spy.calledOnce).to.be.true;
+        expect(spy.firstCall.args[0].detail).to.deep.equal({ value: '12ab' });
+      });
+
+      it('should fire once when a non-composing input follows compositionend (Firefox order)', () => {
+        compose('compositionstart');
+        inputWhile('12ab', true);
+        compose('compositionend');
+        inputWhile('12ab', false);
+
+        expect(spy.calledOnce).to.be.true;
+      });
+
+      it('should not complete a value the app set during the composition', () => {
+        // §11.11: the setter must never complete the code, even when its write
+        // lands while a composition is open.
+        compose('compositionstart');
+        inputWhile('12', true);
+        field.value = '5678';
+
+        compose('compositionend');
+
+        expect(spy.called).to.be.false;
+      });
+
+      it('should not carry a composition that never ended into the next one', () => {
+        // An aborted composition leaves no compositionend. The next composition
+        // must compare with its own starting value, not the stale one.
+        compose('compositionstart');
+        inputWhile('12', true);
+        inputWhile('1234', false);
+        spy.resetHistory();
+
+        compose('compositionstart');
+        inputWhile('1234', true);
+        compose('compositionend');
+
+        expect(spy.called).to.be.false;
+      });
+
+      it('should not complete when blur ends the composition first', () => {
+        // Blur commits the value; a late compositionend must not commit it again.
+        const change = sinon.spy();
+        field.addEventListener('change', change);
+        compose('compositionstart');
+        inputWhile('12ab', true);
+        field.blur();
+
+        compose('compositionend');
+
+        expect(spy.called).to.be.false;
+        expect(change.calledOnce).to.be.true;
+      });
+
+      ['disabled', 'readonly'].forEach((state) => {
+        it(`should not complete when the field became ${state} during the composition`, () => {
+          compose('compositionstart');
+          inputWhile('12ab', true);
+          field[state] = true;
+
+          compose('compositionend');
+
+          expect(spy.called).to.be.false;
+        });
+      });
     });
 
     // §7.6 / §11.11: a server echoing the value back must never re-trigger the

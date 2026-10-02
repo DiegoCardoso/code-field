@@ -226,4 +226,35 @@ describe('validation', () => {
       expect(field.invalid).to.be.true;
     });
   });
+
+  // Ratified as Vaadin parity (§8): these match vaadin-text-field, and follow
+  // from `length` being declared as a base constraint.
+  describe('triggers beyond blur and validate()', () => {
+    it('should validate a partial value present at init', async () => {
+      const initial = fixtureSync('<dc-code-field length="4" value="12"></dc-code-field>');
+      await nextRender();
+      expect(initial.invalid).to.be.true;
+    });
+
+    it('should validate a partial code when required is set', async () => {
+      field.focus();
+      await sendKeys({ type: '12' });
+
+      field.required = true;
+
+      expect(field.invalid).to.be.true;
+    });
+
+    it('should revalidate on each edit once invalid, so fixing the code clears the error', async () => {
+      field.focus();
+      await sendKeys({ type: '12' });
+      field.blur();
+      field.focus();
+
+      await sendKeys({ press: 'Backspace' });
+      await sendKeys({ press: 'Backspace' });
+
+      expect(field.invalid).to.be.false;
+    });
+  });
 });
