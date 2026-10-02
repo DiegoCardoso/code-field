@@ -388,8 +388,20 @@ user-originated** (§7.6) — a filled code must behave exactly like a typed one
 
 ### 7.6 Completion and origin
 
-`code-complete` fires on the **user-originated transition** to a full value: previous
-length < `length`, new length === `length`, change not originated by the property setter.
+`code-complete` fires on a **user-originated edit to a new full value**: new length ===
+`length`, new value differs from the previous one, change not originated by the property
+setter. *(Ratified in `W-7` review; v2 required previous length < `length`, which left a
+fill or paste over an already-full code silent — contradicting §7.5's "a filled code must
+behave exactly like a typed one".)*
+
+- Overwriting a cell of a complete code with a different character fires again: it is a new
+  code to verify. Retyping the same character changes nothing and fires nothing.
+- **Not during IME composition.** An `input` with `isComposing` defers completion to
+  `compositionend`, compared against the value at `compositionstart`, so a candidate the
+  user has not confirmed is never verified. Chromium and Firefox order the final events
+  differently; both are handled. The deferred completion is dropped if the composition is
+  overtaken first: by a programmatic set (§11.11), by a blur (which has already committed),
+  by the field becoming `disabled` or `readonly`, or by a composition that never ended.
 
 - It must not fire on every render while the value happens to be full — a documented source
   of duplicated verification requests.
@@ -554,9 +566,15 @@ the basis that every insertion path already passes through the sanitiser.*
   incomplete constraint with no message and no i18n slot for one.
 - Constraint validation runs **on blur and on explicit `validate()`**, not on every
   keystroke, so a user typing a 6-digit code does not see an error after the first character.
-- **Enter also validates** *(W-7)* when it commits — standard Vaadin behaviour, kept on
-  purpose. Enter on an unchanged value does neither, as in `vaadin-text-field`. So does a change to `required` or `length` while the field has a value or is
-  invalid, because `length` is declared as a base constraint.
+- **Further triggers, ratified as Vaadin parity in `W-7` review.** Each matches
+  `vaadin-text-field`:
+  - Enter validates when it commits. Enter on an unchanged value neither commits nor
+    validates.
+  - A change to `required` or `length` validates when the field has a value or is already
+    invalid. `length` is declared as a base constraint, which is what makes this so.
+  - A partial value present at init is invalid immediately (same mechanism).
+  - Once invalid, every edit revalidates, so fixing the code clears the error without a
+    blur. The "not on every keystroke" rule above is about a field that is *valid*.
 - **`i18n` messages never overwrite a developer-set `errorMessage`** (ADR 0002). The
   component writes `errorMessage` only while it is empty or still holds the component's own
   last message, and clears its own message when the failing constraint has none or passes.

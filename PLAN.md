@@ -218,7 +218,8 @@ Written down because it is the first thing a new session needs and the least rec
 | `W-9` Tests and docs | ⬜ Not started |
 | `F-1`…`F-5` | ⬜ Not started. `F-1` is unblocked and explicitly parallelisable |
 
-**166 tests**, green on Chrome and Firefox. Test files run serially (`concurrency: 1`) — the paste tests share the OS clipboard. Run with `npm test`; Firefox needs
+**180 tests**, green on Chrome and Firefox. Test files run serially (`concurrency: 1`), as
+the paste tests share the OS clipboard. Run with `npm test`; Firefox needs
 `--config web-test-runner-firefox.config.js`. Dev page: `npm start`, or `start:lumo` /
 `start:aura`.
 
@@ -390,13 +391,16 @@ manually and recorded.
 ### `W-7` — Validation, commit, events — ✅ **COMPLETE**
 **Depends:** `W-4` · **Gate for `F-2`: the Java API must not be cut before this lands.**
 
-1. The `_programmatic` origin flag, set only by the property setter (SPEC §7.6).
-2. `code-complete` on the user-originated transition only.
+1. The origin flag (SPEC §7.6). *As built:* `#userValue` holds the value a user edit
+   produced, rather than a boolean set by the setter — see **Done** below for why.
+2. `code-complete` on a user-originated edit to a new full value only, deferred past IME
+   composition. *(Widened from "transition from partial" in review.)*
 3. Completion commit: `value-changed` → `change` → `code-complete`; `change` at most once per
    committed value (SPEC §7.7).
 4. `complete` reflected, not latched.
-5. Two constraints with two `i18n` messages (SPEC §8); validation on blur and `validate()`
-   only.
+5. Two constraints with two `i18n` messages (SPEC §8); validation on blur and `validate()`,
+   plus the Vaadin-parity triggers ratified in review (Enter, constraint change, init,
+   revalidation while invalid).
 6. `manualValidation`, `validated`, `checkValidity()`.
 7. Confirm `input` is **not** re-dispatched.
 
@@ -506,7 +510,10 @@ link`.)*
 2. Constructors, all setters **and getters**.
 3. `isComplete()` from the reflected property.
 4. Value semantics per SPEC §13.2: empty is `""`; client sanitising/truncation round-trips to
-   the server.
+   the server. **The Java setter must sanitise and truncate itself.** On the client a
+   programmatic set fires no `change` (§7.7, by design), so in `ON_CHANGE` mode a
+   client-side truncation never syncs back: the server would hold `123456` while the field
+   shows `1234`.
 5. Javadoc: `clear()` renders no affordance; `mask` is not secrecy; `getValue()` staleness
    caveat resolved by the forced sync.
 
