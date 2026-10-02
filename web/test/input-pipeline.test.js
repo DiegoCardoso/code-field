@@ -8,15 +8,13 @@ import { fixtureSync, nextRender } from '@vaadin/testing-helpers';
 import { sendKeys } from '@web/test-runner-commands';
 import sinon from 'sinon';
 import '../src/code-field.js';
+import { copy, MOD } from './clipboard.js';
 
 /**
  * The input pipeline (SPEC §7.8.2–§7.8.4). Every path that can put characters
  * into the field — assignment, typing, paste, composition — runs through one
  * sanitiser, so the same input produces the same value whichever way it arrives.
  */
-// CI runs on Linux and development on macOS; the clipboard shortcuts differ.
-const MOD = /Mac|iPhone|iPad/u.test(navigator.platform) ? 'Meta' : 'Control';
-
 describe('input pipeline', () => {
   let field, warn;
 
@@ -64,22 +62,6 @@ describe('input pipeline', () => {
   });
 
   describe('paste', () => {
-    // A *real* paste, not a synthetic ClipboardEvent: Firefox ignores
-    // `clipboardData` passed to the ClipboardEvent constructor, so a synthetic
-    // event tests nothing there — and a trusted event is what the component
-    // actually has to handle.
-    //
-    // Copying is separated from pasting because focusing the field re-runs focus
-    // placement (§7.3), which would overwrite any selection a test set up.
-    const copy = async (text) => {
-      const scratch = fixtureSync('<input>');
-      scratch.focus();
-      await sendKeys({ type: text });
-      await sendKeys({ press: `${MOD}+a` });
-      await sendKeys({ press: `${MOD}+c` });
-      scratch.remove();
-    };
-
     const pasteIntoField = async () => {
       await sendKeys({ press: `${MOD}+v` });
       await nextRender();

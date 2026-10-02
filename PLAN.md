@@ -213,12 +213,13 @@ Written down because it is the first thing a new session needs and the least rec
 | `W-4` Input pipeline | ✅ Complete |
 | `W-5` Cells and geometry | 🟡 Cells, click-to-position, caret done. **Outstanding:** §11.4's vertical half (`font-size` from height); item 6 widen-and-clip **blocked on `P0-1`** |
 | `W-6` Fill, hazards | 🟡 Input hiding (§11.12), selection band (§11.2), `clearElement` done. **Outstanding:** fill-detection polling (§7.5, needs `P0-1`), iOS letter-spacing compression, defensive stylesheet insertion (§11.8) |
-| `W-7` Validation, events | ⬜ Not started — **unblocked, and the API freeze gate for the whole Flow track** |
+| `W-7` Validation, events | ✅ Complete — **the web value/event surface is frozen; `F-2` may cut the Java API** |
 | `W-8` Base styles | ⬜ Not started — read §9.1.2 first; the derivation table is largely disproved (issue #26) |
 | `W-9` Tests and docs | ⬜ Not started |
 | `F-1`…`F-5` | ⬜ Not started. `F-1` is unblocked and explicitly parallelisable |
 
-**121 tests**, green on Chrome and Firefox. Run with `npm test`; Firefox needs
+**180 tests**, green on Chrome and Firefox. Test files run serially (`concurrency: 1`), as
+the paste tests share the OS clipboard. Run with `npm test`; Firefox needs
 `--config web-test-runner-firefox.config.js`. Dev page: `npm start`, or `start:lumo` /
 `start:aura`.
 
@@ -387,21 +388,48 @@ loop; RTL test shows LTR cells with mirrored chrome.
 **Exit:** SPEC §14.1's page-CSS test passes; the §14.3 desktop and autofill rows are run once
 manually and recorded.
 
-### `W-7` — Validation, commit, events — ⬜ **NEXT**
+### `W-7` — Validation, commit, events — ✅ **COMPLETE**
 **Depends:** `W-4` · **Gate for `F-2`: the Java API must not be cut before this lands.**
 
-1. The `_programmatic` origin flag, set only by the property setter (SPEC §7.6).
-2. `code-complete` on the user-originated transition only.
+1. The origin flag (SPEC §7.6). *As built:* `#userValue` holds the value a user edit
+   produced, rather than a boolean set by the setter — see **Done** below for why.
+2. `code-complete` on a user-originated edit to a new full value only, deferred past IME
+   composition. *(Widened from "transition from partial" in review.)*
 3. Completion commit: `value-changed` → `change` → `code-complete`; `change` at most once per
    committed value (SPEC §7.7).
 4. `complete` reflected, not latched.
-5. Two constraints with two `i18n` messages (SPEC §8); validation on blur and `validate()`
-   only.
+5. Two constraints with two `i18n` messages (SPEC §8); validation on blur and `validate()`,
+   plus the Vaadin-parity triggers ratified in review (Enter, constraint change, init,
+   revalidation while invalid).
 6. `manualValidation`, `validated`, `checkValidity()`.
 7. Confirm `input` is **not** re-dispatched.
 
 **Exit:** SPEC §14.1's Events, Commit and Validation bullets pass — in particular
 "`code-complete` does not fire on any programmatic set, including the truncation path".
+
+**Done:** all seven, in `events.test.js` and `validation.test.js`. What the work changed:
+
+- **The component owns `change`** (§7.7). Re-dispatching the native one was tried first and
+  was wrong three ways, found in review: the browser compares against the focus-time value
+  and knows nothing of the completion commit or programmatic sets, so deleting back to that
+  value never committed, a partial paste (`setRangeText`) never committed, and a stale
+  baseline swallowed a real edit after a server set.
+- **The origin flag holds the produced value, not a boolean** (§7.6). `value` is sync, so a
+  `value-changed` listener's assignment runs inside the user's edit; with a boolean it
+  completed the code — the §11.11 echo — and escaped §6.5.2's warning.
+- **`length` is declared as a base constraint** (§8), or removing `required` force-clears
+  `invalid` on a partial code.
+- **Paste tests cannot run concurrently** — two files pasting through one OS clipboard
+  failed 1 in 3 Firefox runs.
+
+Fill detection (§7.5) remains `W-6`'s, blocked on `P0-1`; when it lands it must go through
+the same user-edit path, or fill will not complete the code. It must also cover a filler
+that dispatches only `change`: the native `change` is now swallowed, so such a fill reaches
+no host listener until fill detection picks it up.
+
+Found in review and **not** fixed here, because it predates `W-7`: a `value-changed` listener
+that assigns an un-normalised value (`'12 '`) leaves it un-normalised — the `#normalising`
+guard swallows the re-entrant write.
 
 ### `W-8` — Base styles (Lumo + Aura via tokens) — ⚠️ **read SPEC §9.1.2 first**
 **Depends:** `W-5` · **Smaller than originally planned** — `P0-2` established that Vaadin 25
@@ -482,7 +510,10 @@ link`.)*
 2. Constructors, all setters **and getters**.
 3. `isComplete()` from the reflected property.
 4. Value semantics per SPEC §13.2: empty is `""`; client sanitising/truncation round-trips to
-   the server.
+   the server. **The Java setter must sanitise and truncate itself.** On the client a
+   programmatic set fires no `change` (§7.7, by design), so in `ON_CHANGE` mode a
+   client-side truncation never syncs back: the server would hold `123456` while the field
+   shows `1234`.
 5. Javadoc: `clear()` renders no affordance; `mask` is not secrecy; `getValue()` staleness
    caveat resolved by the forced sync.
 

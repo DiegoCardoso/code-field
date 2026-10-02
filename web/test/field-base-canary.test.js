@@ -41,7 +41,20 @@ describe('field-base canary', () => {
     _valueChanged: 2,
     _toggleHasValue: 1,
     _inputElementChanged: 1,
+    // W-7: blur commits and validates through these, and Enter validates.
+    _setFocused: 1,
+    _requestValidation: 0,
+    _constraintsChanged: 1,
+    // W-7: compositionend is attached through these.
+    _addInputListeners: 1,
+    _removeInputListeners: 1,
   };
+
+  it('should declare required as a constraint, which §8 extends with length', () => {
+    // `_constraintsChanged` is observed over this list. If it stops being the
+    // mechanism, removing `required` force-clears a partial code's `invalid`.
+    expect(Probe.constraints).to.include('required');
+  });
 
   for (const [hook, arity] of Object.entries(HOOKS)) {
     it(`should expose ${hook}/${arity}`, () => {

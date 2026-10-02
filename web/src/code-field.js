@@ -16,6 +16,9 @@ import { ThemableMixin } from '@vaadin/vaadin-themable-mixin/vaadin-themable-mix
 import { css, html, LitElement } from 'lit';
 import { ifDefined } from 'lit/directives/if-defined.js';
 
+/** `value` as a string: `null` and `undefined` are the empty code. */
+const asText = (value) => (value == null ? '' : String(value));
+
 /**
  * `<dc-code-field>` — a single-value field for short fixed-length codes.
  *
@@ -61,12 +64,26 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
   #focusFromPointer = false;
 
   /**
-   * True while a value change originates from the user rather than from an
-   * assignment. §6.5.2's warning is about invisible data loss through a
-   * Binder-bound bean; a user holding a key is not that, and warning once per
-   * keystroke would make the console useless.
+   * The value a user edit produced, while that edit is being committed; `null`
+   * otherwise. This is §7.6's origin flag. It holds the *value* rather than a
+   * boolean because `value` is sync: a `value-changed` listener runs inside the
+   * edit, and its own assignment is the app's write, not the user's — with a
+   * boolean it would complete the code (§11.11) and escape §6.5.2's warning.
    */
-  #fromUser = false;
+  #userValue = null;
+
+  /**
+   * The value the app is known to hold: the last `change`, or the last
+   * programmatic assignment. `change` fires only on a difference from this
+   * (§7.7).
+   */
+  #committedValue = '';
+
+  /** The value when an IME composition began, or `null` outside one. */
+  #valueBeforeComposition = null;
+
+  /** The `errorMessage` this component last wrote from `i18n` (ADR 0002). */
+  #i18nErrorMessage = null;
 
   static get properties() {
     return {
@@ -89,6 +106,15 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
       inputMode: {
         type: String,
         value: 'numeric',
+      },
+
+      /**
+       * Error messages for §8's two constraints, as plain strings:
+       * `{ requiredErrorMessage, incompleteErrorMessage }`.
+       */
+      i18n: {
+        type: Object,
+        value: () => ({}),
       },
 
       /**
@@ -179,6 +205,20 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
     ];
   }
 
+  /**
+   * §8's implicit length constraint, declared as one so the base treats it like
+   * any other. Without it the base believes `required` is the only constraint:
+   * removing `required` force-clears `invalid` on a partial code, and changing
+   * `length` never revalidates. `length` is always >= 1, so the field always has
+   * a constraint — which is true.
+   *
+   * @protected
+   * @override
+   */
+  static get constraints() {
+    return [...super.constraints, 'length'];
+  }
+
   static get delegateProps() {
     return [...super.delegateProps, 'inputMode'];
   }
@@ -189,6 +229,7 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
       '__lengthChanged(length)',
       '__normaliseValue(value, length)',
       '__updateComplete(value, length)',
+      '__trackProgrammaticValue(value)',
     ];
   }
 
@@ -576,6 +617,15 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
       const value = this.inputElement.value || '';
       event.preventDefault();
       this.#moveCaretTo(Math.min(value.length, this.length));
+    } else if (event.key === 'Enter' && !event.isComposing) {
+      // Enter commits and validates, as the base's native `change` path did —
+      // only when there is something to commit, as in vaadin-text-field, and
+      // validating first so a `change` listener sees the verdict. An Enter that
+      // confirms an IME composition is not a commit.
+      if (asText(this.value) !== this.#committedValue) {
+        this._requestValidation();
+        this.#commit();
+      }
     }
   }
 
@@ -626,6 +676,11 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
       // No focus, no active cell: §9 requires the active-cell treatment to mean
       // "this is where typing goes", which is untrue when nothing is focused.
       this._activeCell = -1;
+      // Blur ends the user's composition: it commits here, not again at a late
+      // compositionend.
+      this.#valueBeforeComposition = null;
+      // After super, which has validated: a `change` listener sees the verdict.
+      this.#commit();
     }
   }
 
@@ -686,14 +741,176 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
   _onInput(event) {
     this.#sanitiseInputInPlace();
 
-    this.#fromUser = true;
-    try {
-      super._onInput(event);
-    } finally {
-      this.#fromUser = false;
-    }
+    this.#applyUserEdit(() => super._onInput(event), { composing: event.isComposing });
 
     this.#clampCaretWhenFull();
+  }
+
+  /**
+   * Runs a user-originated value change and applies §7.6's completion rule to
+   * it. Detected here, around the edit, rather than in a value observer: an
+   * observer cannot tell a keystroke from an assignment without consulting the
+   * same flag, and the setter must never be able to complete the code (§11.11).
+   *
+   * `value` is `sync`, so by the time `apply` returns `value-changed` has
+   * already been dispatched — which is what puts it first in §7.7's order.
+   *
+   * @private
+   */
+  #applyUserEdit(apply, { composing = false } = {}) {
+    const before = asText(this.value);
+    const produced = this.inputElement.value || '';
+
+    this.#asUser(produced, apply);
+
+    if (composing) {
+      // An IME composition is not finished until compositionend: completing
+      // on a candidate would verify a code the user has not confirmed.
+      return;
+    }
+
+    // A non-composing edit means no composition is open any more, whether or
+    // not one ended cleanly.
+    this.#valueBeforeComposition = null;
+    this.#completeIfNew(before, produced);
+  }
+
+  /**
+   * Runs `apply` with `produced` marked as the user's value, so the observers
+   * that run inside it treat that value — and only that value — as user input.
+   *
+   * @private
+   */
+  #asUser(produced, apply) {
+    this.#userValue = produced;
+    try {
+      apply();
+    } finally {
+      this.#userValue = null;
+    }
+  }
+
+  /**
+   * Recorded at every start, never carried over: a composition that was
+   * aborted without compositionend must not lend its starting value to the
+   * next one.
+   *
+   * @private
+   */
+  #onCompositionStart = () => {
+    this.#valueBeforeComposition = asText(this.value);
+  };
+
+  /**
+   * Completes the composition's result, if it is still the user's to complete.
+   * The pending start value is discarded by anything that ends the user's
+   * ownership of the edit first — a programmatic set (§11.11) or a blur, which
+   * has already committed — and a field that became disabled or readonly
+   * accepts no completion.
+   *
+   * @private
+   */
+  #onCompositionEnd = () => {
+    const before = this.#valueBeforeComposition;
+    this.#valueBeforeComposition = null;
+    if (before === null || this.disabled || this.readonly) {
+      return;
+    }
+
+    this.#completeIfNew(before, this.inputElement.value || '');
+  };
+
+  /**
+   * §7.6: a user edit to a *new* full value completes the code — from empty,
+   * from partial, or over a different complete code.
+   *
+   * @private
+   */
+  #completeIfNew(before, produced) {
+    // Compared against what the user produced, not just its length: a
+    // listener may have replaced it during the edit.
+    const value = asText(this.value);
+    if (value !== before && value.length === this.length && value === this.#normalise(produced)) {
+      // §7.7: completion is a commit — unconditionally, even when the code
+      // was edited back to the value last committed, so every completion is
+      // `value-changed` → `change` → `code-complete` without exception.
+      this.#forceCommit();
+      this.dispatchEvent(new CustomEvent('code-complete', { detail: { value: this.value } }));
+    }
+  }
+
+  /**
+   * §7.7: the component owns `change`. Committing at completion, blur and
+   * Enter, against `#committedValue`, rather than re-dispatching the native
+   * event: the browser compares against the value at focus and knows nothing
+   * of the completion commit or of programmatic sets, so it both duplicates
+   * commits and misses them — a deletion back to the focus-time value, or any
+   * paste, which `setRangeText` makes invisible to it.
+   *
+   * @private
+   */
+  #commit() {
+    if (asText(this.value) !== this.#committedValue) {
+      this.#forceCommit();
+    }
+  }
+
+  /**
+   * Commits whether or not the value differs — completion's case (§7.7).
+   *
+   * @private
+   */
+  #forceCommit() {
+    this.#committedValue = asText(this.value);
+    this.dispatchEvent(new CustomEvent('change', { bubbles: true }));
+  }
+
+  /**
+   * @param {!HTMLElement} input
+   * @protected
+   * @override
+   */
+  _addInputListeners(input) {
+    super._addInputListeners(input);
+    input.addEventListener('compositionstart', this.#onCompositionStart);
+    input.addEventListener('compositionend', this.#onCompositionEnd);
+  }
+
+  /**
+   * @param {!HTMLElement} input
+   * @protected
+   * @override
+   */
+  _removeInputListeners(input) {
+    super._removeInputListeners(input);
+    input.removeEventListener('compositionstart', this.#onCompositionStart);
+    input.removeEventListener('compositionend', this.#onCompositionEnd);
+  }
+
+  /**
+   * The native `change` is never forwarded; `#commit` replaces it.
+   *
+   * @param {Event} event
+   * @protected
+   * @override
+   */
+  _onChange(event) {
+    event.stopPropagation();
+  }
+
+  /**
+   * A programmatic value is one the app already holds, so it becomes the
+   * baseline: committing it again at blur would report the app's own write
+   * back to it (§6.2, §14.1).
+   *
+   * @private
+   */
+  __trackProgrammaticValue(value) {
+    if (!this.#isUserValue(value)) {
+      this.#committedValue = asText(value);
+      // The app has overwritten whatever was being composed.
+      this.#valueBeforeComposition = null;
+    }
   }
 
   /**
@@ -716,12 +933,13 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
       return;
     }
 
-    this.#fromUser = true;
-    try {
+    this.#asUser(restored, () => {
       this.value = restored;
-    } finally {
-      this.#fromUser = false;
-    }
+    });
+
+    // As the browser would treat it: a restored value is not an edit, so
+    // blurring without touching it commits nothing.
+    this.#committedValue = asText(this.value);
   }
 
   /**
@@ -796,6 +1014,80 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
   }
 
   /**
+   * Picks §8's message for the constraint that failed before the verdict is
+   * published, so the error is never shown with the wrong text.
+   *
+   * @return {boolean}
+   * @override
+   */
+  validate() {
+    this.#applyI18nErrorMessage();
+    return super.validate();
+  }
+
+  /**
+   * ADR 0002: a message the developer set is never overwritten. The component
+   * only writes `errorMessage` while it is empty or still holds the message the
+   * component itself wrote last, so switching between §8's two messages works
+   * and a custom one survives.
+   *
+   * @private
+   */
+  #applyI18nErrorMessage() {
+    const owned = !this.errorMessage || this.errorMessage === this.#i18nErrorMessage;
+    if (!owned) {
+      return;
+    }
+
+    const i18n = this.i18n || {};
+    let message;
+    if (this.#isPartial()) {
+      message = i18n.incompleteErrorMessage;
+    } else if (this.#isMissing()) {
+      message = i18n.requiredErrorMessage;
+    }
+
+    // Written even when empty: a passing constraint, or one with no message
+    // configured, must not leave the previous constraint's text showing — and
+    // Flow reads `errorMessage` back, so a stale one is a wrong answer there.
+    this.errorMessage = message || '';
+    this.#i18nErrorMessage = message || null;
+  }
+
+  /**
+   * SPEC §8's implicit length constraint: a partially entered code is always
+   * invalid. An empty one is not — that is `required`'s case, with its own
+   * message.
+   *
+   * Does not call `super`: with no native constraint on the input, the base
+   * answers `!this.invalid` — the previous verdict — so a field made invalid by
+   * a partial code would stay invalid after the user finished it. `required` is
+   * the only other constraint (§8), and it is answered directly.
+   *
+   * @return {boolean}
+   * @override
+   */
+  checkValidity() {
+    return !this.#isPartial() && !this.#isMissing();
+  }
+
+  /**
+   * §8's two constraints, each read in one place so the verdict and the message
+   * cannot drift apart.
+   *
+   * @private
+   */
+  #isPartial() {
+    const { length } = asText(this.value);
+    return length > 0 && length < this.length;
+  }
+
+  /** @private */
+  #isMissing() {
+    return this.required && !this.value;
+  }
+
+  /**
    * SPEC §4.1: **replaced, not wrapped.** The base gates the entire clipboard
    * payload against `allowedCharPattern`, so pasting `123-456` into a digits-only
    * field yields nothing at all — the failure §7.4 forbids. Calling `super` here
@@ -854,12 +1146,9 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
       input.setRangeText('', this.length, input.value.length, 'end');
     }
 
-    this.#fromUser = true;
-    try {
+    this.#applyUserEdit(() => {
       this.value = input.value;
-    } finally {
-      this.#fromUser = false;
-    }
+    });
   }
 
   /**
@@ -873,7 +1162,7 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
    * @private
    */
   #sanitise(value) {
-    const raw = value == null ? '' : String(value);
+    const raw = asText(value);
     const allowed = this.allowedCharPattern ? new RegExp(`^${this.allowedCharPattern}$`, 'u') : null;
 
     let result = '';
@@ -904,14 +1193,14 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
       return;
     }
 
-    const current = value == null ? '' : String(value);
-    const effective = this.#sanitise(current).slice(0, length);
+    const current = asText(value);
+    const effective = this.#normalise(current, length);
 
     if (effective === current) {
       return;
     }
 
-    if (!this.#fromUser) {
+    if (!this.#isUserValue(current)) {
       // §6.5.2: name the input and the result. Silent adjustment through a
       // Binder-bound bean is data loss with no symptom — but the same adjustment
       // during typing is just the field working.
@@ -924,8 +1213,29 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
   }
 
   /** @private */
+  #normalise(value, length = this.length) {
+    return this.#sanitise(value).slice(0, length);
+  }
+
+  /**
+   * Whether `value` is the one the user's edit produced, or that value after
+   * normalising — the observer sees both, as the setter rewrites one into the
+   * other.
+   *
+   * @private
+   */
+  #isUserValue(value) {
+    if (this.#userValue === null) {
+      return false;
+    }
+
+    const current = asText(value);
+    return current === this.#userValue || current === this.#normalise(this.#userValue);
+  }
+
+  /** @private */
   __updateComplete(value, length) {
-    this._setComplete((value || '').length === length);
+    this._setComplete(asText(value).length === length);
   }
 
   /** @private */
@@ -962,7 +1272,7 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
    * @private
    */
   #renderCells() {
-    const value = this.value || '';
+    const value = asText(this.value);
 
     return Array.from({ length: this.length }, (_, index) => {
       const active = index === this._activeCell;
