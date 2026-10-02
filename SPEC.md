@@ -422,6 +422,17 @@ value updated → value-changed → change → code-complete → (blurOnComplete
 - **`change` fires at most once per distinct committed value.** A subsequent `blurOnComplete`
   blur must not re-fire it. The triple `code-complete` + `change` + blur-driven `change` is
   exactly where someone reports a duplicate verification request.
+- **The component owns `change`** *(measured in `W-7`)*. The native event is swallowed and
+  `change` is dispatched at completion, blur and Enter, only when the value differs from the
+  last *committed* value — where a programmatic set also moves that baseline, since the app
+  already holds what it wrote. Re-dispatching the native event cannot work: the browser
+  compares against the focus-time value and sees neither the completion commit nor
+  `setRangeText`, so it duplicates some commits and misses others (a deletion back to the
+  focus-time value; every partial paste).
+- **Every user completion commits**, even when the code was edited back to the value already
+  committed (`1234` → `123` → `1234`). This reads "at most once per distinct value" loosely,
+  deliberately: the alternative breaks the `value-changed` → `change` → `code-complete`
+  guarantee for the second completion, and §7.6 requires that `code-complete` fire.
 - `complete` is **not latched**: it tracks `value.length === length` literally and flips
   back to `false` mid-edit (§7.2). Theme rules keyed on `[complete]` must be written knowing
   they will repaint during editing.
@@ -543,6 +554,12 @@ the basis that every insertion path already passes through the sanitiser.*
   incomplete constraint with no message and no i18n slot for one.
 - Constraint validation runs **on blur and on explicit `validate()`**, not on every
   keystroke, so a user typing a 6-digit code does not see an error after the first character.
+- **Enter also validates** *(W-7)* when it commits — standard Vaadin behaviour, kept on
+  purpose. Enter on an unchanged value does neither, as in `vaadin-text-field`. So does a change to `required` or `length` while the field has a value or is
+  invalid, because `length` is declared as a base constraint.
+- **`i18n` messages never overwrite a developer-set `errorMessage`** (ADR 0002). The
+  component writes `errorMessage` only while it is empty or still holds the component's own
+  last message, and clears its own message when the failing constraint has none or passes.
 - `manualValidation` and `validated` follow standard Vaadin field semantics.
 - The partial value is exposed as-is on `value` (§6.3); invalidity is the signal, not
   coercion to `''`.
