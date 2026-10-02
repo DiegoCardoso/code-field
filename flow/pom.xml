@@ -25,6 +25,9 @@
              Vaadin 25 targets Servlet 6.1: it needs no 6.1-only API at runtime. ee11 was
              tried in F-1 and behaved identically. -->
         <jetty.version>12.1.7</jetty.version>
+        <!-- Must match what the Vaadin BOM manages (JUnit 6 since Vaadin 25), or the
+             BOM's jupiter-api meets this BOM's platform and discovery fails. -->
+        <junit.version>6.0.3</junit.version>
     </properties>
 
     <dependencyManagement>
@@ -33,6 +36,13 @@
                 <groupId>com.vaadin</groupId>
                 <artifactId>vaadin-bom</artifactId>
                 <version>${vaadin.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.junit</groupId>
+                <artifactId>junit-bom</artifactId>
+                <version>${junit.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -45,6 +55,10 @@
                 <plugin>
                     <artifactId>maven-clean-plugin</artifactId>
                     <version>3.4.1</version>
+                </plugin>
+                <plugin>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>3.5.3</version>
                 </plugin>
                 <plugin>
                     <artifactId>maven-war-plugin</artifactId>

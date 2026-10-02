@@ -20,6 +20,18 @@ import { ifDefined } from 'lit/directives/if-defined.js';
 const asText = (value) => (value == null ? '' : String(value));
 
 /**
+ * `value`'s characters — code points, not UTF-16 units. A cell holds one
+ * character, so length, truncation and completeness all count these: counting
+ * units makes an emoji two cells long and lets truncation split it, leaving a
+ * lone surrogate. The Flow server counts the same way, so the two agree.
+ *
+ * Editing is not covered: caret placement and the full-field clamp still
+ * compare the input's UTF-16 offsets with cell counts, so typing next to an
+ * emoji can misbehave (SPEC §6.5.6, a known limitation).
+ */
+const characters = (value) => Array.from(asText(value));
+
+/**
  * `<dc-code-field>` — a single-value field for short fixed-length codes.
  *
  * One real `<input>` in the light DOM, visually transparent, with decorative
@@ -830,7 +842,7 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
     // Compared against what the user produced, not just its length: a
     // listener may have replaced it during the edit.
     const value = asText(this.value);
-    if (value !== before && value.length === this.length && value === this.#normalise(produced)) {
+    if (value !== before && characters(value).length === this.length && value === this.#normalise(produced)) {
       // §7.7: completion is a commit — unconditionally, even when the code
       // was edited back to the value last committed, so every completion is
       // `value-changed` → `change` → `code-complete` without exception.
@@ -1078,7 +1090,7 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
    * @private
    */
   #isPartial() {
-    const { length } = asText(this.value);
+    const { length } = characters(this.value);
     return length > 0 && length < this.length;
   }
 
@@ -1140,15 +1152,26 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
 
     input.setRangeText(sanitised, start, end, 'end');
 
-    if (input.value.length > this.length) {
+    const kept = characters(input.value).slice(0, this.length).join('');
+    if (kept.length < input.value.length) {
       // Trim the overflow with setRangeText too, rather than assigning the whole
-      // value — §7.8.3 forbids whole-value assignment in an editing path.
-      input.setRangeText('', this.length, input.value.length, 'end');
+      // value — §7.8.3 forbids whole-value assignment in an editing path. The cut
+      // is where the kept characters end, in units, so none is split.
+      input.setRangeText('', kept.length, input.value.length, 'end');
     }
 
-    this.#applyUserEdit(() => {
-      this.value = input.value;
-    });
+    // The `input` a native paste or drop would have fired. setRangeText fires
+    // none, so without this every `input` listener — Flow's EAGER value sync
+    // among them — misses the paste entirely. Not the re-dispatch §6.3 forbids:
+    // no native `input` exists here to duplicate. Committing through it also
+    // sends the paste down the same path as typing.
+    input.dispatchEvent(
+      new InputEvent('input', {
+        bubbles: true,
+        composed: true,
+        inputType: event.type === 'drop' ? 'insertFromDrop' : 'insertFromPaste',
+      }),
+    );
   }
 
   /**
@@ -1214,7 +1237,7 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
 
   /** @private */
   #normalise(value, length = this.length) {
-    return this.#sanitise(value).slice(0, length);
+    return characters(this.#sanitise(value)).slice(0, length).join('');
   }
 
   /**
@@ -1235,7 +1258,7 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
 
   /** @private */
   __updateComplete(value, length) {
-    this._setComplete(asText(value).length === length);
+    this._setComplete(characters(value).length === length);
   }
 
   /** @private */
@@ -1272,7 +1295,7 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
    * @private
    */
   #renderCells() {
-    const value = asText(this.value);
+    const value = characters(this.value);
 
     return Array.from({ length: this.length }, (_, index) => {
       const active = index === this._activeCell;

@@ -275,7 +275,7 @@ Plus the standard field API from the base mixins: `label`, `helperText`, `errorM
 | `value-changed` | `{ value }` | Any value change, programmatic included. |
 | `code-complete` | `{ value }` | **User-originated** transition to a full value (§7.6). |
 | `change` | — | Commit: blur, Enter, **and user-originated completion** (§7.7). |
-| `input` | — | Native, from the light-DOM input. **Not re-dispatched** — `input` is already `composed: true` and crosses the boundary retargeted; v1's re-dispatch would have delivered every listener two events. |
+| `input` | — | Native, from the light-DOM input. **Not re-dispatched** — `input` is already `composed: true` and crosses the boundary retargeted; v1's re-dispatch would have delivered every listener two events. **Paste and drop dispatch one** *(F-2 review)*: they insert with `setRangeText`, which fires none, and without it Flow's `EAGER` mode never synchronised a pasted code. Not a re-dispatch — there is no native one to duplicate. |
 | `validated` | `{ valid }` | Standard. |
 
 `unparsable-change` does not apply: the value is always a string. A partially entered code
@@ -305,6 +305,13 @@ time", which together meant `value = "abc"` on a digits-only field was accepted 
    previous value retained.
 5. **`code-complete` never fires from the setter** (§7.6), even when the assigned value is
    complete — including the truncation path.
+6. **Value lengths count characters — code points — not UTF-16 units** *(F-2 review)*: the
+   setter's truncation, paste trimming, `complete` and the cells, on the client and the
+   Flow server alike, so neither splits an emoji into a lone surrogate. **Editing still
+   assumes BMP characters**: caret placement, the append position, End and the
+   full-field clamp compare UTF-16 offsets with cell counts, and the composition sanitiser
+   tests surrogate halves alone. A known limitation, tracked separately; codes are digits
+   or letters in practice.
 
 ---
 

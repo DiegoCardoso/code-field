@@ -220,9 +220,10 @@ Written down because it is the first thing a new session needs and the least rec
 | `W-8` Base styles | ⬜ Not started — read §9.1.2 first; the derivation table is largely disproved (issue #26) |
 | `W-9` Tests and docs | ⬜ Not started |
 | `F-1` Maven scaffolding | ✅ Complete |
-| `F-2`…`F-5` | ⬜ Not started. `F-2` is unblocked (`W-7` froze the API) |
+| `F-2` `CodeField` | ✅ Complete |
+| `F-3`…`F-5` | ⬜ Not started. `F-3` is unblocked |
 
-**180 tests**, green on Chrome and Firefox. Test files run serially (`concurrency: 1`), as
+**186 tests**, green on Chrome and Firefox. Test files run serially (`concurrency: 1`), as
 the paste tests share the OS clipboard. Run with `npm test`; Firefox needs
 `--config web-test-runner-firefox.config.js`. Dev page: `npm start`, or `start:lumo` /
 `start:aura`.
@@ -540,7 +541,7 @@ TestBench, failsafe, Jetty start/stop) land with `F-2`/`F-5`, when something use
 pinning the remaining core plugins plus an enforcer rule for JDK 21, and the Central
 metadata (`url`, `licenses`, `scm`, `developers`), land with `R-1`.
 
-### `F-2` — `CodeField`
+### `F-2` — `CodeField` — ✅ **COMPLETE**
 **Depends:** `F-1`, `W-7` (API frozen), `P0-3` (interface list verified)
 
 1. Class + interface list per SPEC §13, **without** `HasClearButton`, **with**
@@ -548,7 +549,7 @@ metadata (`url`, `licenses`, `scm`, `developers`), land with `R-1`.
    `InputField<…, String>`. `HasValueChangeMode`'s methods are **abstract** and the interface
    carries no default — set `ON_CHANGE` in the constructor, as `TextField` does (`P0-3`).
 2. Constructors, all setters **and getters**.
-3. `isComplete()` from the reflected property.
+3. `isComplete()` from the reflected property. *(Superseded: computed — see **Done**.)*
 4. Value semantics per SPEC §13.2: empty is `""`; client sanitising/truncation round-trips to
    the server. **The Java setter must sanitise and truncate itself.** On the client a
    programmatic set fires no `change` (§7.7, by design), so in `ON_CHANGE` mode a
@@ -559,6 +560,38 @@ metadata (`url`, `licenses`, `scm`, `developers`), land with `R-1`.
 
 **Exit:** value round-trip and `Binder` unit tests pass; a `setLength` shrink truncates on the
 client and the server model agrees.
+
+**Done.** 32 JUnit tests in `CodeFieldTest`, through the public API, `Binder` and the
+element properties that form the wire contract; the smoke view now uses `CodeField` and
+renders in a real browser. Decisions:
+
+- **The server applies §6.5 itself**, with the client's rules: exactly JavaScript's `\s`
+  as whitespace (neither Java `\s` is that set), each character against `^pattern$`, then
+  truncation by code points, with an slf4j warning naming input and result (line breaks
+  escaped). Re-applied, with a value change, when `length` shrinks or
+  `allowedCharPattern` narrows. The client's value is taken as-is: it has already been
+  through the same sanitiser, though a tampered client is not stopped by that.
+- **`allowedCharPattern` the server cannot compile is refused** with
+  `IllegalArgumentException` and the previous pattern kept. The pattern is JavaScript
+  source; Java rejects some of it (`\p{Emoji}`, `\u{31}`, `[^]`) and accepts things
+  JavaScript does not. Accepting it left every later `setValue` throwing.
+- **Two web fixes the review surfaced**, test-first in `web/`: paste and drop now
+  dispatch the `input` a native paste would (Flow's `EAGER` mode syncs on `input` and
+  never saw a pasted code), and value lengths count code points (§6.5.6) — truncation
+  used to split an emoji into a lone surrogate. Editing next to an emoji still assumes BMP
+  characters; that limitation is tracked as an issue, not fixed here.
+- **`isComplete()` is computed** from `getValue()` and `getLength()`. The client's
+  `complete` never synchronises on its own, and a computed answer always agrees with
+  `getValue()` — equally stale mid-typing in `ON_CHANGE` mode, until the commit.
+- **`setLength(<1)` throws** `IllegalArgumentException`: the Java idiom for what the client
+  handles by reverting with a warning.
+- **JUnit 6**, because the Vaadin 25 BOM manages it; a JUnit 5 BOM beside it splits Jupiter
+  from the Platform and discovery fails.
+
+Left to later tasks: `HasThemeVariant<CodeFieldVariant>` arrives with the enum in `F-3`;
+which client event synchronises `value` (`change`, or `input` in `EAGER`) is visible only
+through Flow internals, so `F-5`'s ITs cover it, as Vaadin's own field tests leave it to
+theirs; the "`mask` is not secrecy" Javadoc lands with `mask` in v1.1.
 
 ### `F-3` — Event, i18n, validation
 **Depends:** `F-2`
