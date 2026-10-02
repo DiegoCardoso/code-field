@@ -13,6 +13,12 @@ export default {
   // settled: the loop was unusable until this was lowered.
   testsFinishTimeout: 20000,
   files: ['test/**/*.test.js'],
+  // One test file at a time. The paste tests use the real OS clipboard (a
+  // synthetic ClipboardEvent tests nothing in Firefox), and the clipboard is
+  // shared by every page the runner has open — with two files pasting at once,
+  // one copies while the other pastes and either can read the other's text.
+  // Measured: 1 in 3 Firefox runs failed concurrently, 0 in 5 serially.
+  concurrency: 1,
   // Real key and pointer input through CDP. Synthetic KeyboardEvents do not move
   // a caret — the browser ignores untrusted events for selection — so without
   // these the selection tests in §7.8.1 would assert nothing (W-3).
