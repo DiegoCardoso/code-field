@@ -62,6 +62,51 @@ jobs:
         working-directory: web
         run: npx web-test-runner --config web-test-runner-firefox.config.js
 
+  flow:
+    name: Flow (unit + integration)
+    runs-on: ubuntu-latest
+    # The first IT waits for Vaadin to npm-install and build the dev bundle.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'maven'
+      # Vaadin builds the IT dev bundle with Node. It supports up to 24 and falls back to
+      # downloading its own above that; Node 24 here means it uses this one.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      # The dev bundle's npm install, and the Node Vaadin would otherwise fetch.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            ~/.vaadin
+          key: flow-npm-${{ hashFiles('flow/**/pom.xml', 'web/package.json') }}
+          restore-keys: flow-npm-
+      # Playwright for Java 1.63 uses the same browser builds as npm's playwright
+      # 1.63, so the npm CLI installs them, system dependencies included.
+      - name: Install Playwright browsers
+        run: npx -y playwright@1.63.0 install --with-deps chromium firefox
+      # Unit tests, then the ITs in Chromium and Firefox, against web/ through the
+      # file: link — which resolves from a clean checkout, so no publish is needed.
+      - name: Test
+        working-directory: flow
+        # Without this, Playwright for Java runs its own install on first use and also
+        # fetches WebKit; with it, a missing browser fails fast instead.
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        run: mvn -B verify
+      - name: Upload IT reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flow-it-reports
+          path: flow/**/target/failsafe-reports/
+
   pr-title:
     name: PR title
     if: github.event_name == 'pull_request'
@@ -86,4 +131,3 @@ jobs:
 #   visual  — needs baselines, which land with W-5/W-8. Per SPEC §14.2 it must run
 #             in a pinned container; the monorepo uses
 #             mcr.microsoft.com/playwright:v1.63.0-noble, and we should match.
-#   flow-it — cannot run before W-7 (P0-6.1). Nightly thereafter.

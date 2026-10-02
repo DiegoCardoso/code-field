@@ -40,13 +40,14 @@ collision if Vaadin ever ships the name, and misrepresents provenance. Therefore
 | npm package | `@cardoso/code-field` |
 | Java class | `CodeField` |
 | Maven coordinates | `dev.cardoso:code-field-flow` |
-| TestBench element | `CodeFieldElement` (`@Element("dc-code-field")`) |
+| TestBench element | *none in v1 — dropped at `F-4`, see §14.4* |
 | Shadow parts | unprefixed (`cell`, `separator`, …) |
 
 The **API surface is Vaadin-shaped verbatim** — property names, part names, event names,
 mixin composition and Flow interfaces all match what an in-tree Vaadin component would
-have. Upstreaming later is then a rename across four places (element tag, npm name,
-`@Tag`/`@NpmPackage`/`@JsModule`, `@Element`) and nothing else.
+have. Upstreaming later is then a rename across three places (element tag, npm name,
+`@Tag`/`@NpmPackage`/`@JsModule`) and nothing else. *(Four until `F-4` dropped the TestBench
+element and its `@Element`.)*
 
 The prefix `dc-` is **confirmed** (`P0-6.6`). Changing it is mechanical; changing it *after
 publish* is not — so it is settled before `W-1`.
@@ -109,7 +110,7 @@ keydown handlers, as Zag/Ark, Chakra, Mantine and CoreUI do — is rejected:
 | Partial paste into a half-filled code | manual | native |
 | Password-manager / TOTP fill | fills one box | fills the field |
 | Flow value binding | needs custom serialisation | reuses existing field infrastructure |
-| TestBench | bespoke element | reuses text-field patterns |
+| Browser tests | bespoke element per box | one input to drive |
 
 The cost is a large edge-case surface (§7.8, §7.9, §11). Accepted; mitigations specified.
 
@@ -1097,10 +1098,10 @@ Everything else is closed:
 8. ~~**npm publish vs. local path**~~ — `file:../../web` until the Flow ITs need it, then
    publish `0.0.x` (revised at `F-1`; originally "until `W-7`"). `P0-6`.
 9. ~~**JDK; IT cadence; device-matrix owner and gates**~~ — JDK 21; unit + visual on push,
-   Flow ITs nightly from the first publish; matrix owned by the author, gated at `R-1`,
-   trimmed to owned hardware (§14.3). `P0-6`.
-10. ~~**The `small` visual-test subset**~~ — empty, focused-mid, full, invalid (§14.2). `P0-6`.
-11. ~~**The element prefix**~~ — `dc-`, confirmed (§1.1). `P0-6`.
+   Flow unit tests and ITs on every PR (revised at `F-5`); matrix owned by the author, gated
+   at `R-1`, trimmed to owned hardware (§14.3). `P0-6`. 10. ~~**The `small` visual-test
+   subset**~~ — empty, focused-mid, full, invalid (§14.2). `P0-6`. 11. ~~**The element
+   prefix**~~ — `dc-`, confirmed (§1.1). `P0-6`.
 
 ---
 
@@ -1327,8 +1328,10 @@ register row stays **open**, and the README says so plainly.
 - `CodeCompleteEvent`: payload correct, `field.getValue()` correct inside the listener,
   ordering after `ValueChangeEvent`, never fired for a server-set value.
 - i18n round-trip.
-- TestBench `CodeFieldElement`: `setValue`, `getValue`, `type`, `paste`, `isComplete`,
-  `getCellCount`, `getActiveCellIndex`.
+- **No TestBench `CodeFieldElement` in v1** *(decided at `F-4`)*. TestBench needs a
+  commercial licence to run, and this public repo's CI and outside contributors have none.
+  The ITs use **Playwright for Java** instead, in Chromium and Firefox, the same engines as
+  the web suite. A TestBench element can come later if users ask for one.
 
 ---
 
@@ -1345,8 +1348,7 @@ Summary:
 - **v1** — single-input architecture; `length`, `value`, `allowedCharPattern`, `oneTimeCode`,
   `inputMode`, `complete`; typing / deletion / navigation / paste / fill; the full input
   pipeline; commit semantics; validation with both messages; full field chrome; shrink-to-fit
-  geometry; LTR cells; Lumo + Aura; `small`; the Flow module with integration tests; the
-  TestBench element.
+  geometry; LTR cells; Lumo + Aura; `small`; the Flow module with integration tests.
 - **v1.1** — `groups` / `separator`, `mask`, `placeholderChar`, `autoSelect`,
   `blurOnComplete`, per-cell i18n labels as templates.
 - **Later** — additional size variants, progressive-enhancement fallback. `autoSubmit` is

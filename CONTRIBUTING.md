@@ -52,10 +52,10 @@ Two deliberate divergences, both forced:
 
 ## CI
 
-- **Every push:** lint, format check, unit tests on Chromium **and Firefox**.
+- **Every push:** lint, format check, unit tests on Chromium **and Firefox**, and the Flow
+  module's unit tests and ITs (`mvn verify`, Playwright for Java in both browsers).
 - **Not yet wired:** visual regression (needs baselines from `W-5`/`W-8`; must run in a pinned
-  container — the monorepo uses `mcr.microsoft.com/playwright:v1.63.0-noble`) and Flow ITs
-  (impossible before the first publish; nightly thereafter).
+  container — the monorepo uses `mcr.microsoft.com/playwright:v1.63.0-noble`).
 
 ## Test harness gotchas
 

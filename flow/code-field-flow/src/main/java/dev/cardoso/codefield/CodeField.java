@@ -105,9 +105,11 @@ public class CodeField extends AbstractSinglePropertyField<CodeField, String>
         // §7.7's forced sync: the client sends `value` with every code-complete, and Flow
         // applies it — as a client-originated ValueChangeEvent — before dispatching the
         // event, so getValue() inside a CodeCompleteEvent listener is the completed code.
-        // Without it, an EAGER field's code-complete overtakes its `input` sync (the client
-        // fires `change` and `code-complete` before the host sees `input`), and an ON_CHANGE
-        // field relies on `change` happening to be processed first. It stays registered even
+        // It matters when the mode delays the sync: ON_BLUR (completion does not blur) and
+        // LAZY/TIMEOUT (the `input` sync is debounced). ON_CHANGE and EAGER would cope
+        // without it — their sync event leaves in the same request, and Flow applies
+        // property syncs before events — but nothing guarantees that ordering. F-5's
+        // CompletionIT measured both. It stays registered even
         // with ValueChangeMode null ("never synchronise"): a completion then updates the
         // element's value property without a ValueChangeEvent — set a mode to read values.
         getElement().addEventListener("code-complete", event -> {
