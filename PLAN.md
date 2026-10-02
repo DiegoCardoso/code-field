@@ -217,7 +217,7 @@ Written down because it is the first thing a new session needs and the least rec
 | `W-5` Cells and geometry | 🟡 Cells, click-to-position, caret done. **Outstanding:** §11.4's vertical half (`font-size` from height); item 6 widen-and-clip **blocked on `P0-1`** |
 | `W-6` Fill, hazards | 🟡 Input hiding (§11.12), selection band (§11.2), `clearElement` done. **Outstanding:** fill-detection polling (§7.5, needs `P0-1`), iOS letter-spacing compression, defensive stylesheet insertion (§11.8) |
 | `W-7` Validation, events | ✅ Complete — **the web value/event surface is frozen; `F-2` may cut the Java API** |
-| `W-8` Base styles | ⬜ Not started — read §9.1.2 first; the derivation table is largely disproved (issue #26) |
+| `W-8` Base styles | 🟡 Styles done, measured against a text field in every theme. **Outstanding:** the visual baselines (§14.2), next |
 | `W-9` Tests and docs | ⬜ Not started |
 | `F-1` Maven scaffolding | ✅ Complete |
 | `F-2` `CodeField` | ✅ Complete |
@@ -475,6 +475,43 @@ stylesheet, not two theme implementations.
 
 **Exit:** SPEC §14.2's matrix has committed baselines for both themes × light/dark, plus the
 `small` subset from `P0-6`.
+
+**Done (styles; split from the baselines).** SPEC §9.1 is rewritten from measurement, and
+`web/test/theme-{base,lumo,aura}.test.js` hold the component to it by computed value against
+a real `<vaadin-text-field>` beside it, light and dark, Chromium and Firefox. They cover:
+rest, active, invalid, read-only, disabled, read-only and invalid focus, hover, autofill
+(simulated), `small`, the 24px shrink floor, forced colours, LTR cells under RTL, and the
+field chrome — typography, position, `helper-above-field` and RTL. What it took:
+
+- **The cells are the boxes**; the `input-field` container is neutralised with `!important`
+  properties, not by overriding its hooks, so the hooks — and field-base's state and autofill
+  rules on the part — still reach the cells.
+- **`var()` chains instead of theme detection** for every value: hook, then `--lumo-*`, then
+  the base primitive.
+- **Lumo replaces a Vaadin component's base styles** through its internal injection, which a
+  third-party component cannot use. So Lumo needs **six scoped rules** — no border, the
+  box-shadow ring, the read-only look, the field chrome mirrored from Lumo's mixins, the hover
+  overlay, and forced-colours outlines — and Aura **one**. All counted in SPEC §9.1.3.
+- **§9 amended, with sign-off:** the active cell carries the text field's own focus ring and
+  there is no separate field ring. A focused read-only field, which has no active cell, rings
+  every cell, dashed.
+- **Geometry:** square cells, the text field's own height (Lumo 36, Aura 34, base 32). Traps:
+  the host is an inline-grid with a 100% column (the container needs `width: max-content`);
+  Chromium sizes a flex container from item content widths, ignoring `flex-basis` (cells need
+  a real `inline-size`); and the cell row needs `min-width: 0` to shrink at all.
+- **Fixed on the way, owed by `W-5`:** neither the cells nor the input had `direction: ltr`
+  (§7.9.5). Under RTL the cells ran right to left; once they were fixed and the input was
+  not, every click landed on the neighbouring cell. Both are LTR now, with click tests.
+- The test runner now serves from the repo root, so the theme tests can link Lumo's and
+  Aura's stylesheets.
+
+Known gaps: a field both disabled and autofilled shows the disabled fill in base, where a
+text field shows the autofill colour; the metrics observer does not re-run when only the font changes (pitch stays
+right, the measured advance can go stale); Chrome's own `:autofill` background on the input
+is UA-`!important` and may still tint the cells — check by hand with a real autofill.
+
+Outstanding as `W-8`'s second half: the visual-regression setup in the pinned container,
+the baselines, and CI.
 
 ### `W-9` — Test completion and docs
 **Depends:** `W-5`…`W-8`

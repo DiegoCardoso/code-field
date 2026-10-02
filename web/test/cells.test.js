@@ -111,6 +111,23 @@ describe('cells', () => {
         expect(field._activeCell, `clicking cell ${index} activated ${field._activeCell}`).to.equal(index);
       });
     }
+    // §7.9.5: the cells run left to right in an RTL page, so the input's text must too, or
+    // every click lands on the neighbouring boundary (found in the W-8 review).
+    describe('under dir="rtl"', () => {
+      beforeEach(async () => {
+        field.setAttribute('dir', 'rtl');
+        await nextRender();
+        await nextFrame();
+        await nextFrame();
+      });
+
+      for (const index of [0, 1, 2, 3, 4, 5]) {
+        it(`should place the caret on cell ${index}`, async () => {
+          await clickCell(index);
+          expect(field._activeCell, `clicking cell ${index} activated ${field._activeCell}`).to.equal(index);
+        });
+      }
+    });
   });
 
   describe('the synthetic caret', () => {

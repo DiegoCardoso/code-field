@@ -12,6 +12,7 @@ import { InputController } from '@vaadin/field-base/src/input-controller.js';
 import { InputFieldMixin } from '@vaadin/field-base/src/input-field-mixin.js';
 import { LabelledInputController } from '@vaadin/field-base/src/labelled-input-controller.js';
 import { inputFieldShared } from '@vaadin/field-base/src/styles/input-field-shared-styles.js';
+import { ThemeDetectionMixin } from '@vaadin/vaadin-themable-mixin/vaadin-theme-detection-mixin.js';
 import { ThemableMixin } from '@vaadin/vaadin-themable-mixin/vaadin-themable-mixin.js';
 import { css, html, LitElement } from 'lit';
 import { ifDefined } from 'lit/directives/if-defined.js';
@@ -42,7 +43,7 @@ const characters = (value) => Array.from(asText(value));
  * @customElement
  * @extends HTMLElement
  */
-class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(LitElement)))) {
+class CodeField extends InputFieldMixin(ThemeDetectionMixin(ThemableMixin(ElementMixin(PolylitMixin(LitElement))))) {
   static get is() {
     return 'dc-code-field';
   }
@@ -209,6 +210,14 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
     return [
       ...super.slotStyles,
       `
+        /* §7.9.5: the cells run left to right in an RTL page, so the input's text
+           must too, or each click resolves to the neighbouring boundary. Here and
+           !important, as the hiding properties, so a page-wide input rule cannot
+           reverse it. */
+        ${tag} > input[slot='input'] {
+          direction: ltr !important;
+        }
+
         ${tag} > input[slot='input']::selection {
           background: transparent !important;
           color: transparent !important;
@@ -257,67 +266,467 @@ class CodeField extends InputFieldMixin(ThemableMixin(ElementMixin(PolylitMixin(
           display: none !important;
         }
 
-        /* The absolutely-positioned input resolves against this. Without it,
-         "inset: 0" resolves against the initial containing block and the input
-         covers the whole page — found by measuring, not by reading (P0-3.4). */
+        /* SPEC §9.1, measured at W-8: each cell looks like a <vaadin-text-field>'s
+         input box in the same state, in every theme. Each value falls through the
+         app's hook, Lumo's token, and the base primitive, in that order; only Lumo
+         sets --lumo-*, so the chain picks the theme without detecting it. The hooks
+         reach the cells from the container below, which is how field-base's own
+         state rules (invalid, disabled, autofill) arrive here unchanged. */
+        :host {
+          /* Lumo sizes fields by a token, not by the base computation. */
+          --_cell-lumo-size: var(--lumo-text-field-size, var(--lumo-size-m));
+          --_cell-lumo-font: var(--lumo-font-size-m);
+          /* The field's own height computation, so a cell row lines up with a text
+             field beside it: field-base's formula, or Lumo's size token. 1lh is
+             resolved where this is used, so it is the cell's line height. */
+          --_cell-size: var(
+            --vaadin-input-field-height,
+            var(
+              --_cell-lumo-size,
+              calc(1lh + var(--vaadin-padding-block-container) * 2 + var(--vaadin-input-field-border-width, 1px) * 2)
+            )
+          );
+        }
+
+        :host([theme~='small']) {
+          --_cell-lumo-size: var(--lumo-size-s);
+          --_cell-lumo-font: var(--lumo-font-size-s);
+        }
+
+        /* The cells are the boxes, so the container that holds them stays neutral —
+           otherwise the code sits inside a second box. !important, because the
+           themes style this part from the document (Aura's ::part(input-field),
+           which outranks a shadow-root rule) and the container from its own :host.
+           Properties only, never the --vaadin-input-field-* hooks: the cells read
+           those, inherited from here. The input inside is positioned against it;
+           "inset: 0" would otherwise resolve against the initial containing block
+           (P0-3.4). */
         [part='input-field'] {
           position: relative;
+          background: transparent !important;
+          border-width: 0 !important;
+          box-shadow: none !important;
+          outline: none !important;
+          padding: 0 !important;
+          /* Sized by the cells, not by the text field's default 12em, which is too
+             narrow for six of them. max-content, not auto: the host is an
+             inline-grid with a 100% column, so without a definite width here the
+             column collapses to the cells' 24px floor. A narrower host still
+             shrinks the cells, through field-base's max-width: 100% (§7.9). */
+          width: max-content;
+        }
+
+        /* Lumo's hover highlight and read-only dash live on this pseudo-element. */
+        [part='input-field']::after {
+          display: none;
         }
 
         [part='cells'] {
           display: flex;
-          flex: 1;
-          /* The input is out of flow, so the cells layer is the only thing left in
-           flow to give the container its height. Until W-5 renders real cells,
-           this keeps the field the height of any other field rather than
-           collapsing to its padding. */
-          min-height: var(--vaadin-field-baseline-input-height, 1lh);
+          /* A content basis, so the field's natural width is the cells' full size;
+             min-width 0, so a narrower field can still shrink them to the floor. */
+          flex: 0 1 auto;
+          min-width: 0;
+          /* §7.9.5: the cells run left to right even in an RTL page; a code is not
+             text in the page's direction. The chrome around it still mirrors. */
+          direction: ltr;
+          gap: var(--vaadin-code-field-cell-gap, var(--lumo-space-s, var(--vaadin-gap-s)));
           /* Decorative only: every pointer event must reach the real input
            underneath, or click-to-position stops working (SPEC §5). */
           pointer-events: none;
+          /* Lumo's container treats whatever is slotted into it as the input: it pads
+             it and fades its overflow with a mask, which clips the last cell. */
+          padding: 0;
+          mask-image: none;
+          -webkit-mask-image: none;
         }
 
         [part='cell'] {
-          /* Shrink in CSS, never in JS (§7.9). A JS sizer would need to observe the
-           element whose size it sets. */
-          flex: 1 1 auto;
+          /* A width, not a flex-basis: Chromium sizes a flex container from its
+             items' content widths and ignores the basis, so the field's natural
+             width would be the 24px floor. Shrinks from here to the floor, in CSS,
+             never in JS (§7.9). */
+          flex: 0 1 auto;
+          inline-size: var(--vaadin-code-field-cell-width, var(--_cell-size));
           min-width: 24px;
+          /* Square by default: as tall as a text field's box, and as wide. */
+          block-size: var(--_cell-size);
           display: grid;
           place-items: center;
           position: relative;
           box-sizing: border-box;
-          /* §9.1: derived, so Lumo and Aura differ through tokens rather than
-           through forked CSS. */
-          background: var(--vaadin-input-field-background);
+          /* Aura computes its surface colour on ::part(input-field), the container
+             above, so --aura-surface-color resolves here to Aura's field fill —
+             read-only transparency included. */
+          background: var(
+            --vaadin-input-field-background,
+            var(--lumo-contrast-10pct, var(--aura-surface-color, var(--vaadin-background-color)))
+          );
           border: var(--vaadin-input-field-border-width, 1px) solid
-            var(--vaadin-input-field-border-color, var(--vaadin-border-color, currentColor));
-          border-radius: var(--vaadin-code-field-cell-radius, var(--vaadin-radius-s, 4px));
-          color: var(--vaadin-input-field-value-color, inherit);
-          font-size: var(--vaadin-input-field-value-font-size, inherit);
+            var(--vaadin-input-field-border-color, var(--vaadin-border-color));
+          border-radius: var(
+            --vaadin-code-field-cell-radius,
+            var(--vaadin-input-field-border-radius, var(--lumo-border-radius-m, var(--vaadin-radius-m)))
+          );
+          /* Aura's resting shadow; unset outside Aura. */
+          box-shadow: var(--aura-shadow-xs, none);
+          color: var(--vaadin-input-field-value-color, var(--lumo-body-text-color, var(--vaadin-text-color)));
+          font-size: var(--vaadin-input-field-value-font-size, var(--_cell-lumo-font, 1em));
+          font-weight: var(--vaadin-input-field-value-font-weight, 400);
           /* Digits must not jitter as the code fills. */
           font-variant-numeric: tabular-nums;
         }
 
-        /* §9: the border is the primary indicator and the caret is secondary. It
-         must never be the caret alone — prefers-reduced-motion stops the blink,
-         and nothing would mark a cell that is selected rather than appended. */
+        /* §9 (amended at W-8): the active cell carries the text field's own focus
+         ring; there is no separate field ring. Only a focused field has an active
+         cell, so the ring also says which control has focus. The caret is
+         secondary: prefers-reduced-motion stops its blink, and nothing else would
+         mark a cell that is selected, not appended. */
         [part='cell'][active] {
-          border-width: var(--vaadin-code-field-cell-active-border-width, 2px);
-          border-color: var(--vaadin-focus-ring-color, currentColor);
+          outline: var(--vaadin-focus-ring-width) solid var(--vaadin-focus-ring-color);
+          outline-offset: calc(var(--vaadin-input-field-border-width, 1px) * -1);
         }
 
-        :host([readonly]) [part='cell'] {
-          background: transparent;
-          border: var(--vaadin-input-field-readonly-border, 1px dashed);
-        }
-
-        :host([disabled]) [part='cell'] {
-          background: var(--vaadin-input-field-disabled-background);
-          color: var(--vaadin-input-field-disabled-value-color, inherit);
+        /* A read-only field has no active cell (§7.8.5), so its focus ring goes on
+           every cell, dashed, as field-base's read-only focus ring is. */
+        :host([readonly][focused]) [part='cell'] {
+          outline: var(--vaadin-focus-ring-width) dashed var(--vaadin-focus-ring-color);
+          outline-offset: calc(var(--vaadin-input-field-border-width, 1px) * -1);
         }
 
         :host([invalid]) [part='cell'] {
-          border-color: var(--vaadin-input-field-error-color);
+          border-color: var(--vaadin-input-field-error-color, var(--vaadin-text-color));
+          background: var(
+            --vaadin-input-field-invalid-background,
+            var(
+              --lumo-error-color-10pct,
+              var(
+                --vaadin-input-field-background,
+                var(--lumo-contrast-10pct, var(--aura-surface-color, var(--vaadin-background-color)))
+              )
+            )
+          );
+        }
+
+        :host([readonly]) [part='cell'] {
+          border-style: dashed;
+          box-shadow: none;
+        }
+
+        :host([disabled]) [part='cell'] {
+          background: var(
+            --vaadin-input-field-disabled-background,
+            var(--lumo-contrast-5pct, var(--vaadin-background-container-strong))
+          );
+          border-color: transparent;
+          box-shadow: none;
+          color: var(
+            --vaadin-input-field-disabled-value-color,
+            var(
+              --vaadin-input-field-disabled-text-color,
+              var(--lumo-disabled-text-color, var(--vaadin-text-color-disabled))
+            )
+          );
+        }
+
+        /* Scoped rules: where a theme reaches a treatment by a different mechanism,
+           not just a different value, so no token can carry it (§9.1.1). Each is
+           counted in SPEC §9.1.3. */
+
+        /* Lumo 1: its box has no border at all, and is heavier-set. */
+        :host([data-application-theme='lumo']) [part='cell'] {
+          border: none;
+          font-weight: var(--vaadin-input-field-value-font-weight, 500);
+        }
+
+        /* Lumo 2: its focus ring is an outer box-shadow, not an outline, and turns
+           to the error colour when invalid. */
+        :host([data-application-theme='lumo']) [part='cell'][active],
+        :host([data-application-theme='lumo'][readonly][focused]) [part='cell'] {
+          outline: none;
+          box-shadow: 0 0 0 var(--vaadin-focus-ring-width, 2px)
+            var(--vaadin-focus-ring-color, var(--lumo-primary-color-50pct));
+        }
+
+        :host([data-application-theme='lumo'][invalid]) [part='cell'][active],
+        :host([data-application-theme='lumo'][invalid][readonly][focused]) [part='cell'] {
+          box-shadow: 0 0 0 var(--vaadin-focus-ring-width, 2px) var(--lumo-error-color-50pct);
+        }
+
+        /* Lumo 3: read-only is a transparent box with a dashed edge, and quieter
+           text. */
+        :host([data-application-theme='lumo'][readonly]) [part='cell'] {
+          background: transparent;
+          border: var(--vaadin-input-field-readonly-border, 1px dashed var(--lumo-contrast-30pct));
+          color: var(--lumo-secondary-text-color);
+        }
+
+        /* Lumo 5: the hover highlight, an overlay a text field draws on its box. */
+        :host([data-application-theme='lumo']) [part='cell']::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          border-radius: inherit;
+          pointer-events: none;
+          background: var(--vaadin-input-field-hover-highlight, var(--lumo-contrast-50pct));
+          opacity: 0;
+          transition: opacity 0.2s;
+        }
+
+        :host([data-application-theme='lumo'][invalid]) [part='cell']::after {
+          background: var(--vaadin-input-field-invalid-hover-highlight, var(--lumo-error-color-50pct));
+        }
+
+        :host([data-application-theme='lumo']:hover:not([readonly]):not([focused]):not([disabled]))
+          [part='cell']::after {
+          opacity: var(--vaadin-input-field-hover-highlight-opacity, 0.1);
+        }
+
+        /* Lumo 6: in forced colours a box-shadow is dropped, so Lumo outlines its box
+           instead — without this the cells have no edge and the active cell no ring. */
+        @media (forced-colors: active) {
+          :host([data-application-theme='lumo']:not([readonly])) [part='cell'] {
+            outline: 1px solid;
+            outline-offset: -1px;
+          }
+
+          :host([data-application-theme='lumo']) [part='cell'][active] {
+            outline: 2px solid;
+            outline-offset: -1px;
+          }
+
+          :host([data-application-theme='lumo'][disabled]) [part='cell'] {
+            outline-color: GrayText;
+          }
+        }
+
+        /* Lumo 4: the field chrome. A text field gets Lumo's label, helper and error
+           styling through Lumo's internal style injection (@media lumo_mixins_*),
+           which a third-party component cannot use (SPEC §9.1.3), so it is mirrored
+           here — values through Lumo's tokens, structure copied from
+           @vaadin/vaadin-lumo-styles/src/mixins/field-{base,label,helper,
+           error-message,required}.css at 25.2.11. The theme-lumo tests compare its
+           typography and position with a real text field — including small,
+           helper-above-field and RTL — so drift there fails a test. The hover
+           colours and the disabled helper are mirrored but not tested (§9.1.3). */
+        :host([data-application-theme='lumo']) {
+          display: inline-flex;
+          padding: var(--lumo-space-xs) 0;
+          font-family: var(--lumo-font-family);
+          font-size: var(--vaadin-input-field-value-font-size, var(--lumo-font-size-m));
+          color: var(--vaadin-input-field-value-color, var(--lumo-body-text-color));
+          -webkit-font-smoothing: antialiased;
+          -moz-osx-font-smoothing: grayscale;
+          -webkit-tap-highlight-color: transparent;
+        }
+
+        /* Puts the host's baseline on the box, as a text field's does. */
+        :host([data-application-theme='lumo'])::before {
+          content: '\\2003';
+          width: 0;
+          /* The base chrome gives this pseudo-element padding, a border and a negative
+             margin for its own baseline trick; with them, "width: 0" still leaves
+             18px and pushes the field right. Lumo's text field never gets them. */
+          padding: 0;
+          border: 0;
+          margin-bottom: 0;
+          height: var(--_cell-size);
+          box-sizing: border-box;
+          display: inline-flex;
+          align-items: center;
+        }
+
+        :host([data-application-theme='lumo'][has-label])::before {
+          margin-top: calc(var(--lumo-font-size-s) * 1.5);
+        }
+
+        :host([data-application-theme='lumo'][has-label][theme~='small'])::before {
+          margin-top: calc(var(--lumo-font-size-xs) * 1.5);
+        }
+
+        :host([data-application-theme='lumo'][has-label]) {
+          padding-top: var(--lumo-space-m);
+        }
+
+        :host([data-application-theme='lumo']) .vaadin-field-container {
+          display: flex;
+          flex-direction: column;
+          /* Lumo's own bounds, which keep the field within its host; its 12em width
+             is not copied, since the cells set the natural width. */
+          min-width: 100%;
+          max-width: 100%;
+        }
+
+        :host([data-application-theme='lumo']) [part='label'] {
+          align-self: flex-start;
+          color: var(--vaadin-input-field-label-color, var(--lumo-secondary-text-color));
+          font-weight: var(--vaadin-input-field-label-font-weight, 500);
+          font-size: var(--vaadin-input-field-label-font-size, var(--lumo-font-size-s));
+          line-height: 1;
+          padding-inline: calc(var(--lumo-border-radius-m) / 4) 1em;
+          padding-bottom: 0.5em;
+          padding-top: 0.25em;
+          margin-top: -0.25em;
+          /* Lumo's text field never gets the base chrome, which adds this margin and
+             stretches the label to the full field width; Lumo's label is as wide as
+             its text, which is where the required indicator sits. */
+          margin-bottom: 0;
+          width: auto;
+          min-width: 0;
+          overflow: hidden;
+          white-space: nowrap;
+          text-overflow: ellipsis;
+          position: relative;
+          max-width: 100%;
+          box-sizing: border-box;
+        }
+
+        :host([data-application-theme='lumo'][focused]:not([readonly])) [part='label'] {
+          color: var(--vaadin-input-field-focused-label-color, var(--lumo-primary-text-color));
+        }
+
+        :host([data-application-theme='lumo']:hover:not([readonly]):not([focused])) [part='label'] {
+          color: var(--vaadin-input-field-hovered-label-color, var(--lumo-body-text-color));
+        }
+
+        :host([data-application-theme='lumo'][has-helper]) [part='helper-text']::before {
+          content: '';
+          display: block;
+          height: var(--vaadin-input-field-helper-spacing, 0.4em);
+        }
+
+        :host([data-application-theme='lumo']) [part='helper-text'] {
+          display: block;
+          color: var(--vaadin-input-field-helper-color, var(--lumo-secondary-text-color));
+          font-size: var(--vaadin-input-field-helper-font-size, var(--lumo-font-size-xs));
+          line-height: var(--lumo-line-height-xs);
+          font-weight: var(--vaadin-input-field-helper-font-weight, 400);
+          margin-left: calc(var(--lumo-border-radius-m) / 4);
+          /* Base chrome margins, which Lumo's text field never gets. */
+          margin-top: 0;
+          margin-bottom: 0;
+        }
+
+        :host([data-application-theme='lumo'][disabled]) [part='helper-text'] {
+          color: var(--lumo-disabled-text-color);
+          -webkit-text-fill-color: var(--lumo-disabled-text-color);
+        }
+
+        :host([data-application-theme='lumo']) [part='error-message'] {
+          margin-left: calc(var(--lumo-border-radius-m) / 4);
+          font-size: var(--vaadin-input-field-error-font-size, var(--lumo-font-size-xs));
+          line-height: var(--lumo-line-height-xs);
+          font-weight: var(--vaadin-input-field-error-font-weight, 400);
+          color: var(--vaadin-input-field-error-color, var(--lumo-error-text-color));
+          max-height: 5em;
+          /* Base chrome lays the message out as an icon row with a margin above. */
+          display: block;
+          margin-top: 0;
+        }
+
+        :host([data-application-theme='lumo'][has-error-message]) [part='error-message']::before,
+        :host([data-application-theme='lumo'][has-error-message]) [part='error-message']::after {
+          content: '';
+          display: block;
+          height: 0.4em;
+          /* Not base's warning icon. */
+          width: auto;
+          mask: none;
+          background: none;
+        }
+
+        :host([data-application-theme='lumo']:not([invalid])) [part='error-message'] {
+          max-height: 0;
+          overflow: hidden;
+        }
+
+        /* Lumo leaves the indicator a plain inline span and positions only its
+           ::after, against the label; the base chrome makes the span itself an
+           absolute 1em box. Required-only, or base's display: none for a field that
+           is not required would be overridden and its '*' would show. */
+        :host([data-application-theme='lumo'][required]) [part='required-indicator'] {
+          display: inline;
+          position: static;
+          width: auto;
+          text-align: initial;
+        }
+
+        :host([data-application-theme='lumo'][required]) [part='required-indicator']::after {
+          content: var(--vaadin-input-field-required-indicator, var(--lumo-required-field-indicator, '\\2022'));
+          color: var(
+            --vaadin-input-field-required-indicator-color,
+            var(--lumo-required-field-indicator-color, var(--lumo-primary-text-color))
+          );
+          position: absolute;
+          right: 0;
+          width: 1em;
+          text-align: center;
+        }
+
+        :host([data-application-theme='lumo'][invalid]) [part='required-indicator']::after {
+          color: var(
+            --vaadin-input-field-required-indicator-color,
+            var(--lumo-required-field-indicator-color, var(--lumo-error-text-color))
+          );
+        }
+
+        :host([data-application-theme='lumo'][theme~='small']) [part='label'] {
+          font-size: var(--vaadin-input-field-label-font-size, var(--lumo-font-size-xs));
+        }
+
+        :host([data-application-theme='lumo'][theme~='small']) {
+          font-size: var(--lumo-font-size-s);
+        }
+
+        :host([data-application-theme='lumo']:hover:not([readonly])) [part='helper-text'] {
+          color: var(--lumo-body-text-color);
+        }
+
+        :host([data-application-theme='lumo'][theme~='small']) [part='error-message'] {
+          font-size: var(--lumo-font-size-xxs);
+        }
+
+        :host([data-application-theme='lumo'][dir='rtl']) [part='error-message'] {
+          margin-left: 0;
+          margin-right: calc(var(--lumo-border-radius-m) / 4);
+        }
+
+        :host([data-application-theme='lumo'][dir='rtl']) [part='required-indicator']::after {
+          right: auto;
+          left: 0;
+        }
+
+        :host([data-application-theme='lumo'][has-helper][theme~='helper-above-field']) [part='helper-text']::before {
+          display: none;
+        }
+
+        :host([data-application-theme='lumo'][has-helper][theme~='helper-above-field']) [part='helper-text']::after {
+          content: '';
+          display: block;
+          height: var(--vaadin-input-field-helper-spacing, 0.4em);
+        }
+
+        :host([data-application-theme='lumo'][has-helper][theme~='helper-above-field']) [part='label'] {
+          order: 0;
+          padding-bottom: var(--vaadin-input-field-helper-spacing, 0.4em);
+        }
+
+        :host([data-application-theme='lumo'][has-helper][theme~='helper-above-field']) [part='helper-text'] {
+          order: 1;
+        }
+
+        :host([data-application-theme='lumo'][has-helper][theme~='helper-above-field']) [part='label'] + * {
+          order: 2;
+        }
+
+        :host([data-application-theme='lumo'][has-helper][theme~='helper-above-field']) [part='error-message'] {
+          order: 3;
+        }
+
+        /* Aura 1 (§9.1.3 #7): disabled uses the lighter container primitive, where the base
+           style uses the strong one — by a rule on the part, not a token. */
+        :host([data-application-theme='aura'][disabled]) [part='cell'] {
+          background: var(--vaadin-input-field-disabled-background, var(--vaadin-background-container));
         }
 
         [part='caret'] {
