@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>dev.cardoso</groupId>
+    <artifactId>code-field-flow-parent</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <packaging>pom</packaging>
+    <name>code-field Flow (parent)</name>
+
+    <modules>
+        <module>code-field-flow</module>
+        <module>code-field-flow-integration-tests</module>
+    </modules>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- P0-5: Vaadin 25 compiles to release 21 (TextField.class is bytecode 65). -->
+        <maven.compiler.release>21</maven.compiler.release>
+        <!-- P0-5: the Maven line tops out below npm's. This pin and @NpmPackage's are two
+             pins under one bump policy, not one version in two places (ADR-0001). -->
+        <vaadin.version>25.2.8</vaadin.version>
+        <!-- The ee10 (Servlet 6.0) plugin, as Vaadin's own IT and TestBench setup uses, though
+             Vaadin 25 targets Servlet 6.1: it needs no 6.1-only API at runtime. ee11 was
+             tried in F-1 and behaved identically. -->
+        <jetty.version>12.1.7</jetty.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>com.vaadin</groupId>
+                <artifactId>vaadin-bom</artifactId>
+                <version>${vaadin.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <artifactId>maven-clean-plugin</artifactId>
+                    <version>3.4.1</version>
+                </plugin>
+                <plugin>
+                    <artifactId>maven-war-plugin</artifactId>
+                    <version>3.4.0</version>
+                    <configuration>
+                        <!-- Vaadin registers its servlet itself; there is no web.xml. Needed
+                             despite being the documented default: F-1's first build failed
+                             without it. -->
+                        <failOnMissingWebXml>false</failOnMissingWebXml>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>com.vaadin</groupId>
+                    <artifactId>vaadin-maven-plugin</artifactId>
+                    <version>${vaadin.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.eclipse.jetty.ee10</groupId>
+                    <artifactId>jetty-ee10-maven-plugin</artifactId>
+                    <version>${jetty.version}</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+</project>

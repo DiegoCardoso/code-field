@@ -51,12 +51,13 @@ have. Upstreaming later is then a rename across four places (element tag, npm na
 The prefix `dc-` is **confirmed** (`P0-6.6`). Changing it is mechanical; changing it *after
 publish* is not — so it is settled before `W-1`.
 
-> **Repo shape (revised).** v2 specified "two standalone repos". It is **one repo** with `web/`
-> and `flow/` as sibling packages, published as two artifacts. The Flow module resolves the web
-> package by relative path (`file:../web`) until `W-7`, which is reproducible on any checkout;
-> two repos would have made that per-machine `npm link` state CI cannot reproduce. Splitting
-> later is cheap, and upstreaming sends the web half into `vaadin/web-components`, itself a
-> monorepo.
+> **Repo shape (revised).** v2 specified "two standalone repos". It is **one repo** with
+> `web/` and `flow/` as sibling packages, published as two artifacts. The Flow module
+> resolves the web package by relative path (`file:../../web`) until the first publish, which
+> is reproducible on any checkout; two repos would have made that per-machine `npm link`
+> state CI cannot reproduce. Splitting later is cheap, and upstreaming sends the web half
+> into `vaadin/web-components`, itself a monorepo.
+
 
 ---
 
@@ -1086,10 +1087,11 @@ Everything else is closed:
 7. ~~**Vaadin 25 GA status and pin**~~ — GA. The npm and Maven lines are decoupled: Maven tops
    out at `25.2.8` while npm is at `25.2.12`, and `25.2.10` never existed on Maven at all. See
    the Platform row above and ADR-0001. `P0-5`.
-8. ~~**npm publish vs. local path**~~ — `file:../web` until `W-7`, then publish `0.0.x`. `P0-6`.
+8. ~~**npm publish vs. local path**~~ — `file:../../web` until the Flow ITs need it, then
+   publish `0.0.x` (revised at `F-1`; originally "until `W-7`"). `P0-6`.
 9. ~~**JDK; IT cadence; device-matrix owner and gates**~~ — JDK 21; unit + visual on push,
-   Flow ITs nightly from `W-7`; matrix owned by the author, gated at `R-1`, trimmed to owned
-   hardware (§14.3). `P0-6`.
+   Flow ITs nightly from the first publish; matrix owned by the author, gated at `R-1`,
+   trimmed to owned hardware (§14.3). `P0-6`.
 10. ~~**The `small` visual-test subset**~~ — empty, focused-mid, full, invalid (§14.2). `P0-6`.
 11. ~~**The element prefix**~~ — `dc-`, confirmed (§1.1). `P0-6`.
 

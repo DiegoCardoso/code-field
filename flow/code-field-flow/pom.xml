@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>dev.cardoso</groupId>
+        <artifactId>code-field-flow-parent</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>code-field-flow</artifactId>
+    <packaging>jar</packaging>
+    <name>code-field Flow</name>
+    <description>Vaadin Flow API for the dc-code-field web component.</description>
+
+    <dependencies>
+        <!-- Explicit, not transitive (P0-3): HasAllowedCharPattern, HasTooltip,
+             HasValidationProperties, ValidationUtil and InputField all live here, and
+             flow-server / flow-data do not bring it in. -->
+        <dependency>
+            <groupId>com.vaadin</groupId>
+            <artifactId>vaadin-flow-components-base</artifactId>
+        </dependency>
+        <!-- Provided, as Vaadin's own component modules declare it: the application
+             supplies the Flow runtime. -->
+        <dependency>
+            <groupId>com.vaadin</groupId>
+            <artifactId>flow-data</artifactId>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+</project>

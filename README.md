@@ -21,15 +21,15 @@ work natively instead of being reimplemented. [SPEC.md §4](./SPEC.md) has the c
 
 ## Repository layout
 
-| Path             | What                                                                               |
-| ---------------- | ---------------------------------------------------------------------------------- |
-| `web/`           | The web component, npm `@cardoso/code-field`                                       |
-| `flow/`          | The Vaadin Flow Java module, Maven `dev.cardoso:code-field-flow` (not yet created) |
-| `SPEC.md`        | Decision-locked specification                                                      |
-| `PLAN.md`        | Delivery plan, task by task                                                        |
-| `P0-FINDINGS.md` | What the Phase 0 probes established                                                |
-| `docs/adr/`      | Architecture decisions                                                             |
-| `docs/design/`   | Visual direction                                                                   |
+| Path             | What                                                             |
+| ---------------- | ---------------------------------------------------------------- |
+| `web/`           | The web component, npm `@cardoso/code-field`                     |
+| `flow/`          | The Vaadin Flow Java module, Maven `dev.cardoso:code-field-flow` |
+| `SPEC.md`        | Decision-locked specification                                    |
+| `PLAN.md`        | Delivery plan, task by task                                      |
+| `P0-FINDINGS.md` | What the Phase 0 probes established                              |
+| `docs/adr/`      | Architecture decisions                                           |
+| `docs/design/`   | Visual direction                                                 |
 
 ## Development
 

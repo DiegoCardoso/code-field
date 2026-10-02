@@ -228,4 +228,4 @@ asks for that comparison.
 | `P0-3` | Mixin list corrected; paste conflict resolved; **Flow interfaces verified**. Container prototype + canary test outstanding. |
 | `P0-4` | **Decided:** build the animated prototype anyway; solo review a day later (no design function to sign off). |
 | `P0-1` | **Narrowed:** always-widen decided up front (no runtime detection); one probe — 1Password on Chrome — for the constant and the clip mechanism. |
-| `P0-6` | Resolved. Prefix `dc-`; one public GitHub repo; local link until `W-7`; CI push/nightly split; Vaadin's test stack; `small` subset confirmed. |
+| `P0-6` | Resolved. Prefix `dc-`; one public GitHub repo; local link until the first publish (revised at `F-1`; originally `W-7`); CI push/nightly split; Vaadin's test stack; `small` subset confirmed. |
