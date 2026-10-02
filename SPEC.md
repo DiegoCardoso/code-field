@@ -618,6 +618,11 @@ Lumo and Aura supply tokens; neither carries a per-component style module.
 >
 > `LumoInjectionMixin` and `ThemeDetector` are documented **"for internal use only, do not use
 > in custom components."** Do not use either, even though `vaadin-text-field.js` does.
+>
+> *Revised at `W-8`:* "the themes supply tokens" holds for Aura, not for Lumo. Lumo replaces a
+> Vaadin component's base styles through that internal injection, so under Lumo a third-party
+> component gets Lumo's tokens but not its rules. The scoped rules are therefore mostly Lumo
+> ones, and they are counted in §9.1.3.
 
 **Parts:** `container`, `input-field`, `cells`, `cell`, `separator` (v1.1), `caret`, plus
 inherited `label`, `helper-text`, `error-message`, `required-indicator`.
@@ -634,8 +639,12 @@ reinvented (P0-FINDINGS `P0-3`).
 cell size and font, not chrome spacing, so it composes with shrink-to-fit rather than
 competing with it.
 
-**Active-cell treatment (closed):** an **accent border** on the active cell, plus the
-synthetic caret inside it; the field-level focus ring is retained in all cases. Chosen over
+**Active-cell treatment (closed; amended at `W-8`):** the active cell carries **the text
+field's own focus ring**, plus the synthetic caret inside it. *There is no separate
+field-level ring* — v2 kept one, but only a focused field has an active cell, so the cell's
+ring already answers "which control am I in", and a second ring around the row doubled it.
+A read-only field shows no target cell (§7.8.5), so there the ring goes on every cell,
+dashed, as field-base's read-only focus ring is — whichever cell the selection sits in. Chosen over
 a filled/inverted cell (competes with the `filled` state attribute and hurts caret and
 character legibility) and over caret-only (weakest affordance on touch, and invisible under
 `prefers-reduced-motion` if the blink is the only signal).
@@ -643,7 +652,7 @@ character legibility) and over caret-only (weakest affordance on touch, and invi
 **The caret renders only where the selection is genuinely collapsed** — the append position.
 Everywhere else the active cell is a one-character *selection* (§7.8.1) and typing replaces
 it, so an insertion point claims something untrue and strikes through the character. The
-accent border carries those cases alone, which is the same property that makes it survive
+cell's ring carries those cases alone, which is the same property that makes it survive
 `prefers-reduced-motion`.
 
 The mockup (§9.2) built all three and reached the same conclusion independently, framing the
@@ -651,8 +660,9 @@ chosen one as *"the same 1px-to-2px outline shift a text field already makes on 
 better articulation, because it makes the treatment a **reuse of existing field behaviour**
 rather than a new invention. It also adds an argument against caret-only that this section
 missed: with the blink suppressed, nothing at all marks a cell that is *selected* rather than
-appended to. **The border is the primary indicator and the caret is secondary** — not a pair
-of equals.
+appended to. **The ring is the primary indicator and the caret is secondary** — not a pair
+of equals. *(At `W-8` the "1px-to-2px shift" became the text field's actual focus ring,
+measured per theme, which is the same reuse taken literally.)*
 
 **Separator (closed, v1.1):** a **rendered glyph** in `part="separator"`, not a bare gap.
 See §11.10 for its structural cost.
@@ -671,138 +681,108 @@ forbids wrapping for — and the active cell has no outline of its own left to t
 Constraints on both themes:
 
 - Cell width must accommodate the widest allowed glyph; use tabular numerals.
-- Focus indication is on the active *cell*, **and** the field as a whole shows a focus ring
-  — the "which control am I in" question.
+- Focus indication is on the active *cell* — which also answers the "which control am I in"
+  question, since only a focused field has one. *(v2 also required a field-level ring;
+  dropped at `W-8`.)*
 - The synthetic caret's blink animation must respect `prefers-reduced-motion`, and the
-  active cell must remain identifiable with motion disabled (hence the accent border).
+  active cell must remain identifiable with motion disabled (hence the ring) — and in forced
+  colours, where a box-shadow ring is dropped (§9.1.3, Lumo 6).
 - Cells must not wrap; shrink to the floor, then overflow (§7.9).
 - Do not override the cell row's `direction: ltr` (§7.9.6).
 - Do not restyle the input's five hiding properties (§11.12).
 
 ### 9.1 Token derivation — **derive first, invent only what has no analogue**
 
-The base stylesheet derives from the `--vaadin-*` tokens the themes set, so that most of the
-Lumo/Aura difference is encoded in tokens rather than in forked CSS.
+*Rewritten at `W-8` from measurement (`web/test/theme-*.test.js`), replacing v2's provisional
+table, most of which did not hold (§9.1.2).*
 
-> **Status: provisional, and partly disproved — see §9.1.2.** The *mechanism* is confirmed;
-> the exact per-property mapping below is **not** verified, and measurement through the dev
-> page's theme switcher showed most of it does not hold. `W-8` must rewrite it. What is confirmed: the themes set a **primitive scale**
-> (Aura's `size.css` defines `--vaadin-padding-block-container`, `--vaadin-radius-s`,
-> `--vaadin-gap-*`), and components consume those primitives through computed fallbacks. Do
-> not assume a component-level token exists just because a name appears in a `var()`.
+**Rule: a cell looks like a `<vaadin-text-field>`'s input box in the same state, in every
+theme.** The tests hold the component to it by computed value against a real text field
+beside it, in base, Lumo and Aura, light and dark, every state.
 
-**Cell height must reproduce the field's own height computation**, not invent one, so a cell
-row lines up with a text field beside it. `field-base-styles.js` computes it as:
+**The cells are the boxes.** The `input-field` part that holds them stays visually neutral —
+no fill, border, shadow, padding or focus outline — or the code sits inside a second box. It
+is made neutral through its own `--vaadin-input-field-*` hooks where it has them, and by rules
+from the component's shadow root (which outrank the container's `:host` rules) where it does
+not.
 
-```
-1lh + --vaadin-padding-block-container × 2 + --vaadin-input-field-border-width × 2
-```
+**Values come from `var()` chains, not from theme detection:** the app's hook first, then
+Lumo's token, then the base primitive. Only Lumo sets `--lumo-*`, so the chain picks the
+theme by itself. The hooks a cell reads are captured on `:host` first, because the neutral
+container overrides the same names on itself and the cells, its children, would inherit the
+overrides.
 
-`--vaadin-field-baseline-input-height` is **not** a theme-set token — it appears once in the
-monorepo, as an override hook wrapping that expression. Use the computation; respect the hook.
-
-| Cell property | Source |
+| Cell property | Chain (hook → Lumo → base) |
 |---|---|
-| Rest outline | `--vaadin-input-field-border-width` / `--vaadin-input-field-border-color` |
-| Cell fill | `--vaadin-input-field-background` — this alone produces the mockup's "Aura outlines, Lumo fills" difference, because the two themes set it differently |
-| Character size / colour | `--vaadin-input-field-value-font-size`, `--vaadin-input-field-value-color` |
-| Disabled | `--vaadin-input-field-disabled-background`, `--vaadin-disabled-cursor` |
-| Read-only | `--vaadin-input-field-readonly-border` — Lumo defaults it to `1px dashed var(--lumo-contrast-30pct)` over a transparent background; Aura instead zeroes its surface opacity |
-| Invalid | `--vaadin-input-field-error-color` |
-| Autofill | `--vaadin-input-field-autofill-background`, `--vaadin-input-field-autofill-color` (§11.3) |
+| Height | `--vaadin-input-field-height` → `--lumo-size-m` (`-s` when `small`) → field-base's own `1lh + --vaadin-padding-block-container × 2 + border × 2` |
+| Width | `--vaadin-code-field-cell-width` → the height: **square by default**, shrinking to a 24px floor (§7.9) |
+| Gap | `--vaadin-code-field-cell-gap` → `--lumo-space-s` → `--vaadin-gap-s` |
+| Fill | `--vaadin-input-field-background` → `--lumo-contrast-10pct` → `--aura-surface-color` → `--vaadin-background-color`. Aura's step resolves at the cell to the surface colour Aura computes on `::part(input-field)` — the container — so the cells get Aura's exact fill |
+| Outline | `--vaadin-input-field-border-width` (1px) solid `--vaadin-input-field-border-color` → `--vaadin-border-color` |
+| Radius | `--vaadin-code-field-cell-radius` → `--vaadin-input-field-border-radius` → `--lumo-border-radius-m` → **`--vaadin-radius-m`** (v2 said `-s`; the text field uses `-m`) |
+| Character | `--vaadin-input-field-value-{font-size,color,font-weight}` → `--lumo-font-size-m`, `--lumo-body-text-color` → inherit, `--vaadin-text-color`, 400 |
+| Shadow | `--aura-shadow-xs` (Aura only; none elsewhere) |
+
+**The hooks reach the cells by inheritance from the container**, which is neutralised with
+`!important` *properties* rather than by overriding the hooks. That is how field-base's own
+state and autofill rules on `::part(input-field)` still reach the cells unchanged. One hook
+behaves differently from a text field: `--vaadin-input-field-height` is read only by Lumo's
+text field, so setting it under base or Aura resizes the cells but not a text field beside
+them.
 
 Only these are genuinely new, and only these get `--vaadin-code-field-*` names:
-
 `--vaadin-code-field-cell-width` · `--vaadin-code-field-cell-gap` ·
-`--vaadin-code-field-cell-radius` · `--vaadin-code-field-cell-active-border-width` ·
-`--vaadin-code-field-caret-width` · `--vaadin-code-field-caret-color` ·
-`--vaadin-code-field-separator-color`
-
-**Radius — resolved.** There is genuinely no `--vaadin-input-field-border-radius`. But the
-platform has a house pattern for exactly this, visible in `checkable-base-styles.js`:
-
-```css
-border-radius: var(--vaadin-<component>-border-radius, var(--vaadin-radius-s));
-```
-
-a component-scoped token falling back to the **global radius scale**. So use
-`var(--vaadin-code-field-cell-radius, var(--vaadin-radius-s))`. The theme difference the
-mockup shows (Aura 9px, Lumo 8px) then comes from `--vaadin-radius-s`, which each theme sets
-— again, no forking.
-
-### 9.1.2 What the themes actually publish — **measured**
-
-Read off the component with Aura applied (dev page, `?theme=aura:light`):
-
-```
---vaadin-input-field-background        (unset)
---vaadin-input-field-border-color      (unset)
---vaadin-input-field-border-width      (unset)
---vaadin-input-field-value-font-size   (unset)
---vaadin-input-field-readonly-border   (unset)
---vaadin-radius-s                      min(0.25lh, round(3 * 1px + 2px, 1px))   ← set
-```
-
-…while `<vaadin-input-container>`'s real background is `oklab(1 0 0 / 0.7)`.
-
-**The themes style `::part(input-field)` directly and publish only *primitives*.** The
-component-level `--vaadin-input-field-*` names are consumed-with-fallback inside `field-base`;
-they are not a token surface a third-party component can read. Our cells therefore run on
-fallbacks, which is why they render transparent in both themes where the mockup expected Lumo
-to fill them.
-
-**What does work**, measured the same way: derivation through *primitives*. Identical CSS
-yields radius 3px (Lumo) vs 5px (Aura), font 16px vs 14px, cells 31×18 vs 26×22, with no
-theme-specific rules — and in Aura the field matches `<vaadin-text-field>` exactly at 82px.
-
-So `W-8`'s real choice is: derive from primitives where possible, and for anything a theme
-applies by styling a part rather than setting a token, either match what it does to
-`::part(input-field)` or accept a `ThemeDetectionMixin` rule. §9.1 wanted to avoid the latter;
-it now has a measured reason to allow it. Tracked as issue #26.
+`--vaadin-code-field-cell-radius` · `--vaadin-code-field-caret-width` ·
+`--vaadin-code-field-caret-color` · `--vaadin-code-field-separator-color` (v1.1).
+`--vaadin-code-field-cell-active-border-width` is gone: the active cell uses the field's own
+focus treatment, not a thicker border.
 
 ### 9.1.1 Per-state cell treatment
 
-Derived where the platform provides a source; the mockup supplies the intended look.
-
 | State | Cell treatment |
 |---|---|
-| Rest | Fill from `--vaadin-input-field-background`; outline from `--vaadin-input-field-border-width`/`-color` |
-| Active | Outline width doubled — the text field's own focus shift. Fill unchanged. Plus the caret |
-| Filled | No treatment of its own; the character is the signal. `filled` exists for themes, not for us |
-| Invalid | Outline recoloured to `--vaadin-input-field-error-color`, **on every cell**, filled or not |
-| Disabled | `--vaadin-input-field-disabled-background`, muted text, `--vaadin-disabled-cursor` |
-| Read-only | Transparent fill, no shadow, `var(--vaadin-input-field-readonly-border, …)` |
+| Rest | The chains above |
+| Active | **The text field's own focus ring**: base and Aura an outline of `--vaadin-focus-ring-width` in `--vaadin-focus-ring-color`, offset inward by the border; Lumo an outer box-shadow, in the error colour when invalid (§9.1.3). Plus the caret. Read-only: every cell, dashed |
+| Filled | No treatment of its own; the character is the signal. `filled` exists for themes |
+| Invalid | Outline in `--vaadin-input-field-error-color`; fill `--vaadin-input-field-invalid-background` → `--lumo-error-color-10pct` (Lumo tints the fill, others keep it). **Every cell** |
+| Disabled | Fill `--vaadin-input-field-disabled-background` → `--lumo-contrast-5pct` → `--vaadin-background-container-strong`; transparent outline; disabled text colour |
+| Read-only | Dashed outline (base, Aura); Aura's fill goes transparent through its surface opacity; Lumo §9.1.3 |
+| Hover | Nothing in base and Aura; Lumo's highlight overlay on each cell (§9.1.3) |
+| Autofill | field-base's `--vaadin-input-field-autofill-*` hooks, reaching the cells from the part |
 
-**Read-only is derived, not invented — verified in source.** `field-base` sets only
-`cursor: default` for `:host([readonly])`, so the visible treatment comes from the themes, and
-both have one:
+### 9.1.2 Why v2's table failed — **measured**
 
-```css
-/* @vaadin/vaadin-lumo-styles/src/components/input-container.css:123 (confirmed at 25.2.11) */
-:host([readonly])::after {
-  background-color: transparent;
-  border: var(--vaadin-input-field-readonly-border, 1px dashed var(--lumo-contrast-30pct));
-}
-```
+v2 assumed the themes set component-level `--vaadin-input-field-*` tokens. They do not. They
+publish **primitives** and style `::part(input-field)` directly; the `--vaadin-input-field-*`
+names are hooks a text field reads with fallbacks. v2's measurement also read the tokens off
+our own component rather than off a text field. And the deciding fact: **Lumo replaces a
+Vaadin component's base styles entirely, through its internal style injection** (`@media
+lumo_mixins_*`), while Aura is plain CSS layered over them. A third-party component receives
+neither Lumo's rules nor, under Lumo, anything but its tokens — hence §9.1.3.
 
-Aura takes the same shape by a different route — `[readonly]::part(input-field)` zeroes its
-surface opacity and the resting box-shadow is scoped to `:not([readonly], [disabled])`.
+### 9.1.3 Scoped rules — **counted**
 
-So the mockup's dashed read-only border is **the platform convention, not a design
-invention**, and `--vaadin-input-field-readonly-border` is a real token that carries the
-Lumo/Aura difference for free. Apply it to `part="cell"` and the treatment derives like
-everything else in §9.1.
+Where a theme reaches a treatment by a different *mechanism*, not just a different value, no
+token can carry it, and a rule scoped by the public `ThemeDetectionMixin`
+(`[data-application-theme=…]`) is the honest answer. **Never** `LumoInjectionMixin` or
+`ThemeDetector`, both documented internal-only. Each rule is listed, with its reason, so the
+count stays visible:
 
-`[data-application-theme='aura']` rules via `ThemeDetectionMixin` remain available but are a
-**last resort**: every such rule is a place where the two themes have forked, which is what
-this section forbids.
+| # | Theme | Rule | Why no token can carry it |
+|---|---|---|---|
+| 1 | Lumo | Cells have no border; value weight 500 | Lumo's box has no border at all, not a zero-width token |
+| 2 | Lumo | Active cell: box-shadow ring, no outline; error colour when invalid | Lumo's focus ring is a box-shadow, base's an outline |
+| 3 | Lumo | Read-only: transparent fill, dashed `--vaadin-input-field-readonly-border`, secondary text | Lumo draws it with an `::after` on the box |
+| 4 | Lumo | **Field chrome**: label, helper, error message, required indicator, host spacing and baseline, `small`, `helper-above-field`, RTL | Mirrored from `@vaadin/vaadin-lumo-styles` `mixins/field-*.css`, which reach a text field only through Lumo's internal injection. Values through Lumo tokens, structure copied — and the base chrome's own rules undone where Lumo's text field never gets them. **It can drift**: the Lumo tests compare position and typography against a real text field, including `small`, `helper-above-field` and RTL, so drift there fails a test. Hover colours on label and helper, and the disabled helper, are mirrored but not tested |
+| 5 | Lumo | Hover highlight overlay per cell | Lumo draws it as an `::after` on the box |
+| 6 | Lumo | Forced colours: outline every cell, 2px on the active one | Forced colours drop box-shadows, which is how Lumo draws its ring; Lumo outlines its box instead |
+| 7 | Aura | Disabled fill `--vaadin-background-container` | Aura's disabled field uses the lighter primitive where base uses `-strong`, by a rule on the part |
 
-**Zero such rules is the target, not a prediction.** Aura and Lumo do not always express the
-same treatment the same way — read-only is transparent-plus-dashed-border in Lumo but a
-zeroed surface opacity in Aura, reached through `::part(input-field)` rather than a shared
-token. Where the two genuinely diverge in *mechanism* rather than in value, a scoped rule is
-the honest answer and pretending otherwise produces a stylesheet that quietly looks wrong in
-one theme. `W-8` should record each one it adds, with the reason.
+**Geometry that results** (the §9.2 sanity check): Lumo 36×36 cells, 8px gap, 4px radius;
+Aura 34×34, 8px, 9px; base 32×32, 8px, 6px. The mockup's larger Aura cells (44×48) lose to
+the rule that cells line up with a text field beside them. One measured tolerance: with no
+theme, Firefox draws a text field 1.4px taller than field-base's `1lh` formula (its `normal`
+line-height inside an `<input>`); the cells follow the formula.
 
 ### 9.2 Visual direction — [`docs/design/code-field-mockup.html`](./docs/design/code-field-mockup.html)
 
@@ -813,9 +793,10 @@ and the spec wins where they differ.
 What it contributes: the three-way focus-treatment comparison and the separator options
 above; and concrete starting geometry — **Aura** 44×48px cells, 6px gap, 9px radius, 20px
 type; **Lumo** 40×40px, 8px gap, 8px radius, 18px type. Those numbers are a sanity check on
-the derivation in §9.1, not values to hard-code: if deriving from
-`--vaadin-field-baseline-input-height` lands far from them, something is wrong in the
-derivation.
+the derivation in §9.1, not values to hard-code: if the derivation lands far from them,
+something is wrong in it. *(At `W-8` the cells follow field-base's own height formula, or
+Lumo's size token — not `--vaadin-field-baseline-input-height`, which only the field's
+baseline helper reads.)*
 
 **It was built against the v1 spec and disagrees with v2 in five places. None are adopted:**
 
@@ -1056,8 +1037,8 @@ have a row for.
 | RTL | Cells always LTR, enforced; chrome mirrors; **in the v1 test matrix** (§7.9.6) |
 | `groups` | `groups="3 3"` / `setGroups(int...)` + `getGroups()`; **v1.1** |
 | Separator | Rendered glyph; v1.1; documented iOS geometry cost (§11.10). **`separator=""` is gap-only**, free and cosmetic — explicitly **not** an iOS mitigation, since the cost is the separator's width (§9, §11.10) |
-| Active cell | Accent border **primary**, synthetic caret **secondary**; field ring retained. Framed as the text field's own 1px→2px focus shift, not a new treatment (§9) |
-| Cell tokens | **Derive** from `--vaadin-field-baseline-input-height` / `--vaadin-input-field-*`; invent `--vaadin-code-field-*` only for gap, radius, active border width and caret. Theme difference falls out of tokens, with **no** theme-specific CSS (§9.1) |
+| Active cell | The text field's own focus ring **primary**, synthetic caret **secondary**; no separate field ring; read-only rings every cell, dashed (§9; amended at `W-8`) |
+| Cell tokens | **Derive** through `var()` chains: the app's `--vaadin-input-field-*` hook, then Lumo's token, then the base primitive; invent `--vaadin-code-field-*` only for width, gap, radius and caret. Five counted theme-scoped rules where a theme differs in mechanism (§9.1, §9.1.3; revised at `W-8`) |
 | Visual direction | `code-field-mockup.html` is directional only; it predates v2 and disagrees in five places, none adopted (§9.2) |
 | Clear button | Dropped both platforms; `clear()` remains, no affordance (§6.1) |
 | `small` variant | Ships in v1, cell sizing only, visual-tested on a subset (§14.2) |

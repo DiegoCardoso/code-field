@@ -16,7 +16,8 @@ import { expect } from 'chai';
  */
 describe('dev page', () => {
   it('should reference modules with root-absolute paths', async () => {
-    const response = await fetch('/dev/index.html');
+    // Served from the repo root (rootDir in web-test-runner.config.js).
+    const response = await fetch('/web/dev/index.html');
     expect(response.ok, 'could not read the dev page').to.be.true;
 
     const html = await response.text();
