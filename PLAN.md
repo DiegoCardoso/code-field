@@ -179,13 +179,13 @@ bump policy, and JDK 21 in the Maven config and CI.
 1. **Local path, not early publish.** `flow/` resolves the web package as `file:../../web`.
    The plan was to switch to `0.0.x` prereleases at `W-7`; *revised at `F-1`*, publishing
    waits until the Flow ITs have something to run (`F-2`/`F-5`), since an npm version cannot
-   be reused and publishing early buys nothing. Consequence to hold onto: **the Flow ITs
-   cannot run in CI until the first publish**, because a clean CI checkout has no published
-   package to resolve. Flow CI switches on partway through Phase 1; it is not an `F-1`
-   deliverable.
+   be reused and publishing early buys nothing. *(Revised again at `F-5`: the old
+   consequence — "the Flow ITs cannot run in CI until the first publish" — was false. The
+   `file:` link resolves inside a clean checkout, as `F-1` verified, so the ITs run in CI
+   today, on every PR.)*
 2. **Web CI, on push:** lint, typecheck, unit tests in Chromium **and Firefox**, visual
    regression in a **pinned container** (unpinned renderers rot baselines).
-3. **Flow CI:** ITs **nightly**, from the first publish (see 1).
+3. **Flow CI:** unit tests and ITs **on every PR** *(decided at `F-5`; was nightly)*.
 4. **Device matrix:** owner is the author, gate is **`R-1` only**, and the matrix is trimmed to
    hardware that exists — iPhone, desktop Chrome + 1Password. Untestable rows are marked
    `UNTESTED` in SPEC §14.3 and repeated in the README rather than quietly carried. Naming
@@ -222,7 +222,8 @@ Written down because it is the first thing a new session needs and the least rec
 | `F-1` Maven scaffolding | ✅ Complete |
 | `F-2` `CodeField` | ✅ Complete |
 | `F-3` Event, i18n, validation | ✅ Complete |
-| `F-4`, `F-5` | ⬜ Not started. `F-4` is unblocked |
+| `F-4` TestBench element | ❌ Dropped — no licence in CI; ITs use Playwright for Java |
+| `F-5` Integration tests | ✅ Complete |
 
 **186 tests**, green on Chrome and Firefox. Test files run serially (`concurrency: 1`), as
 the paste tests share the OS clipboard. Run with `npm test`; Firefox needs
@@ -538,9 +539,9 @@ deployed. The npm annotations sit on the smoke view, not on a
   into `~/.vaadin`.
 
 Deferred from review, deliberately: test dependencies (JUnit, `flow-test-generic`,
-TestBench, failsafe, Jetty start/stop) land with `F-2`/`F-5`, when something uses them;
-pinning the remaining core plugins plus an enforcer rule for JDK 21, and the Central
-metadata (`url`, `licenses`, `scm`, `developers`), land with `R-1`.
+failsafe, Jetty start/stop) land with `F-2`/`F-5`, when something uses them — TestBench was
+later dropped at `F-4`; pinning the remaining core plugins plus an enforcer rule for JDK 21,
+and the Central metadata (`url`, `licenses`, `scm`, `developers`), land with `R-1`.
 
 ### `F-2` — `CodeField` — ✅ **COMPLETE**
 **Depends:** `F-1`, `W-7` (API frozen), `P0-3` (interface list verified)
@@ -627,8 +628,10 @@ Vaadin's own component tests do. Decisions:
   the element's `value` property stale, so a later `clear()` back to the old value is never
   sent. The effect exists only on the wire, so no unit test sees it; **checked once by hand
   in a browser** (`ON_CHANGE` and `EAGER`: value change, then completion, `getValue()` equal
-  to the payload). `F-5` must automate exactly that. Until then, one test-only read of
-  Flow's internal `ElementListenerMap` guards the registration itself.
+  to the payload). `F-5` must automate exactly that. *(F-5 found those two modes hold even
+  without the sync; the modes that need it are `ON_BLUR` and `LAZY`/`TIMEOUT`.)* A test-only
+  read of Flow's internal `ElementListenerMap` guards the registration in the unit suite;
+  `F-5`'s `CompletionIT` guards the behaviour.
 - **Validation triggers:** every value change, as `TextField`; plus `setLength` and
   `setRequiredIndicatorVisible` when the field has a value or is already invalid, matching
   the client's ratified §8 parity — so a required field does not load showing an error.
@@ -645,22 +648,54 @@ Vaadin's own component tests do. Decisions:
   with `ValueChangeMode` `null` a completion still updates the element's `value` property,
   without a `ValueChangeEvent`.
 
-### `F-4` — TestBench element
+### `F-4` — TestBench element — ❌ **DROPPED**
 **Depends:** `F-2`
+
+**Dropped before it started.** TestBench needs a commercial licence to run. This machine has
+one; the public repo's CI and outside contributors do not, so every IT built on the element
+would run for one person only. `F-5` uses Playwright for Java instead (SPEC §14.4). Kept
+below for the record.
 
 `CodeFieldElement` with `@Element("dc-code-field")`: `setValue`, `getValue`, `type`, `paste`,
 `isComplete`, `getCellCount`, `getActiveCellIndex`.
 
 **Exit:** used by `F-5`'s ITs; no IT reaches into the shadow root directly.
 
-### `F-5` — Integration tests
-**Depends:** `F-3`, `F-4`
+### `F-5` — Integration tests — ✅ **COMPLETE**
+**Depends:** `F-3`
+
+**Playwright for Java**, in Chromium and Firefox. Each IT drives real input — keyboard,
+clipboard, focus and blur on the slotted input — and reads the server through text its view
+renders from listeners; server actions are buttons in the view. No IT reads the shadow root
+or Flow internals. Also owed here: the forced sync's ordering (`F-3`), which client event
+synchronises `value` per `ValueChangeMode` (`F-2`), and an `EAGER` paste.
 
 Views + ITs for: value round-trip; `Binder` + both constraint messages; `setLength` after
 attach with truncation; `ValueChangeMode`; `CodeCompleteEvent` payload, ordering, and
 never-on-server-set; i18n; disabled/readonly.
 
 **Exit:** SPEC §14.4 green in CI at the cadence `P0-6` chose.
+
+**Done.** 17 IT methods in five classes, each run in Chromium and Firefox (34 runs), against
+one test view (`FieldView`) configured by query parameters. They run on every PR in CI's
+`flow` job. Each class was checked against a deliberately broken implementation, except
+`StateIT`, whose behaviour lives in the browser's own `disabled` and `readonly` handling.
+Found:
+
+- **The forced sync matters only for delayed modes.** Without it, `ON_CHANGE` and `EAGER`
+  still deliver the value first: their sync event leaves in the same request as
+  `code-complete`, and Flow applies property syncs before events. `ON_BLUR` and `LAZY`
+  fail without it. F-3's comment and notes claimed `EAGER`; corrected.
+- **A commit can be overtaken.** Observed, mechanism not proven: a value committed while
+  a request is in flight was sometimes never seen by the server, which saw only the next
+  one — 9 of 30 runs in a probe. No keystroke was lost. The likely in-flight request was
+  the page's own after navigation; `open()` now waits for Flow to go idle, and tests wait
+  for the server between commits that they assert separately.
+- **`Binder` without `asRequired()` overrides the component's `required` verdict**: after
+  each change it sets `invalid` from its own validation. Same as `TextField`; the test of
+  the component's own `required` runs without `Binder`.
+- `settle()` waits on `window.Vaadin.Flow.clients[*].isActive()`, the flag TestBench waits
+  on, to read the server's answer rather than a stale page. It reads no state.
 
 ## Release
 
@@ -713,7 +748,7 @@ A **template string** (`"Character {index} of {length}"`), not a function, so it
 Flow boundary. Not applied by default.
 
 ### `V11-5` — Flow parity
-The v1.1 setters/getters, i18n additions, TestBench additions, ITs.
+The v1.1 setters/getters, i18n additions, ITs.
 
 ---
 
@@ -727,7 +762,7 @@ P0-4 ─┤                             ├─► W-6 ─┤        ├─► W-
 P0-5 ─┤                             └─► W-7 ─┴────────┘          ▲
 P0-6 ─┘                                      │                   │
                                              │  F-1 ─► F-2 ─► F-3 ─► F-5
-                                             └────────►│      F-4 ─┘
+                                             └────────►│   (F-4 dropped)
                                               (API freeze gate)
 ```
 

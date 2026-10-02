@@ -28,6 +28,8 @@
         <!-- Must match what the Vaadin BOM manages (JUnit 6 since Vaadin 25), or the
              BOM's jupiter-api meets this BOM's platform and discovery fails. -->
         <junit.version>6.0.3</junit.version>
+        <!-- Same as web/'s playwright, so both suites use the same browser builds. -->
+        <playwright.version>1.63.0</playwright.version>
     </properties>
 
     <dependencyManagement>
@@ -46,6 +48,11 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <dependency>
+                <groupId>com.microsoft.playwright</groupId>
+                <artifactId>playwright</artifactId>
+                <version>${playwright.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
@@ -58,6 +65,10 @@
                 </plugin>
                 <plugin>
                     <artifactId>maven-surefire-plugin</artifactId>
+                    <version>3.5.3</version>
+                </plugin>
+                <plugin>
+                    <artifactId>maven-failsafe-plugin</artifactId>
                     <version>3.5.3</version>
                 </plugin>
                 <plugin>
