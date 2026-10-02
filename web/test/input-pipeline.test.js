@@ -338,3 +338,56 @@ describe('input pipeline', () => {
     });
   });
 });
+
+/**
+ * Astral characters are one character but two UTF-16 units. Length, truncation
+ * and completeness count characters — code points — on both sides, so the
+ * client and the Flow server agree, and a truncation can never split one in
+ * half and leave a lone surrogate.
+ */
+describe('characters outside the BMP', () => {
+  let field, warn;
+
+  beforeEach(async () => {
+    field = fixtureSync('<dc-code-field length="2"></dc-code-field>');
+    await nextRender();
+    warn = sinon.stub(console, 'warn');
+  });
+
+  afterEach(() => {
+    warn.restore();
+  });
+
+  it('should count an emoji as one character', () => {
+    field.value = '1😀';
+    expect(field.value).to.equal('1😀');
+    expect(warn.called).to.be.false;
+  });
+
+  it('should truncate by characters, never splitting one', () => {
+    field.value = '😀😀😀';
+    expect(field.value).to.equal('😀😀');
+  });
+
+  it('should be complete when every cell holds a character', () => {
+    field.value = '😀😀';
+    expect(field.complete).to.be.true;
+  });
+
+  it('should trim an oversized paste by characters', async () => {
+    await copy('😀😀😀');
+    field.focus();
+
+    await sendKeys({ press: `${MOD}+v` });
+    await nextRender();
+
+    expect(field.value).to.equal('😀😀');
+  });
+
+  it('should render one whole character per cell', async () => {
+    field.value = '😀😀';
+    await nextRender();
+    const cells = [...field.shadowRoot.querySelectorAll('[part~="cell"]')].map((c) => c.textContent.trim());
+    expect(cells).to.deep.equal(['😀', '😀']);
+  });
+});

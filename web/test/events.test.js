@@ -439,5 +439,20 @@ describe('events', () => {
 
       expect(spy.callCount).to.equal(2);
     });
+
+    it('should reach a host listener once for a paste', async () => {
+      // A native paste fires `input`; the component replaces the paste with
+      // setRangeText, which fires none. Without one, Flow's EAGER mode — which
+      // synchronises on `input` — never learns of a pasted code.
+      await copy('12');
+      const spy = sinon.spy();
+      field.addEventListener('input', spy);
+      field.focus();
+
+      await sendKeys({ press: `${MOD}+v` });
+
+      expect(field.value).to.equal('12');
+      expect(spy.callCount).to.equal(1);
+    });
   });
 });
