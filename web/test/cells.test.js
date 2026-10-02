@@ -5,7 +5,7 @@
  */
 import { expect } from 'chai';
 import { fixtureSync, nextFrame, nextRender } from '@vaadin/testing-helpers';
-import { sendMouse } from '@web/test-runner-commands';
+import { emulateMedia, sendMouse } from '@web/test-runner-commands';
 
 import '../src/code-field.js';
 
@@ -127,6 +127,44 @@ describe('cells', () => {
           expect(field._activeCell, `clicking cell ${index} activated ${field._activeCell}`).to.equal(index);
         });
       }
+    });
+  });
+
+  it('should show no active cell and no caret in a focused read-only field', async () => {
+    // §7.8.5 / §14.1: read-only is focusable, but nothing can be typed, so marking a target
+    // cell or drawing an insertion point would claim something untrue. Found by the W-8
+    // visual baselines.
+    field.value = '12';
+    field.readonly = true;
+    await nextRender();
+
+    field.focus();
+    await nextRender();
+
+    expect(cells().some((cell) => cell.hasAttribute('active'))).to.be.false;
+    expect(Boolean(field.shadowRoot.querySelector('[part~="caret"]'))).to.be.false;
+  });
+
+  describe('the caret under prefers-reduced-motion', () => {
+    // §9: with motion disabled the caret must stop blinking. The visual baselines are all
+    // taken under reduce, so a broken rule would show there only as flakiness; this is the
+    // direct check.
+    after(() => emulateMedia({ reducedMotion: 'no-preference' }));
+
+    const caretAnimation = async () => {
+      field.focus();
+      await nextRender();
+      return getComputedStyle(field.shadowRoot.querySelector('[part~="caret"]')).animationName;
+    };
+
+    it('should blink by default', async () => {
+      await emulateMedia({ reducedMotion: 'no-preference' });
+      expect(await caretAnimation()).to.equal('dc-code-field-blink');
+    });
+
+    it('should stop blinking when motion is reduced', async () => {
+      await emulateMedia({ reducedMotion: 'reduce' });
+      expect(await caretAnimation()).to.equal('none');
     });
   });
 

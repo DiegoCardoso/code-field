@@ -62,6 +62,31 @@ jobs:
         working-directory: web
         run: npx web-test-runner --config web-test-runner-firefox.config.js
 
+  # SPEC §14.2. In the pinned image only: baselines from any other renderer differ in fonts
+  # and antialiasing. scripts/visual.sh runs the same image locally and reads it from here.
+  visual:
+    name: Visual
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      options: --ipc=host
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      HUSKY: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci --no-audit --no-fund
+      - name: Visual tests
+        working-directory: web
+        run: npx web-test-runner --config web-test-runner-visual.config.js
+      - name: Upload failed screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-failed
+          path: web/test/visual/screenshots/*/failed/
+          if-no-files-found: ignore
+
   flow:
     name: Flow (unit + integration)
     runs-on: ubuntu-latest
@@ -124,10 +149,3 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: echo "$PR_TITLE" | npx commitlint
-
-
-# Not wired yet, deliberately:
-#
-#   visual  — needs baselines, which land with W-5/W-8. Per SPEC §14.2 it must run
-#             in a pinned container; the monorepo uses
-#             mcr.microsoft.com/playwright:v1.63.0-noble, and we should match.

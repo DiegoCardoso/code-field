@@ -217,7 +217,7 @@ Written down because it is the first thing a new session needs and the least rec
 | `W-5` Cells and geometry | 🟡 Cells, click-to-position, caret done. **Outstanding:** §11.4's vertical half (`font-size` from height); item 6 widen-and-clip **blocked on `P0-1`** |
 | `W-6` Fill, hazards | 🟡 Input hiding (§11.12), selection band (§11.2), `clearElement` done. **Outstanding:** fill-detection polling (§7.5, needs `P0-1`), iOS letter-spacing compression, defensive stylesheet insertion (§11.8) |
 | `W-7` Validation, events | ✅ Complete — **the web value/event surface is frozen; `F-2` may cut the Java API** |
-| `W-8` Base styles | 🟡 Styles done, measured against a text field in every theme. **Outstanding:** the visual baselines (§14.2), next |
+| `W-8` Base styles | ✅ Complete — styles, then 96 visual baselines in the pinned container |
 | `W-9` Tests and docs | ⬜ Not started |
 | `F-1` Maven scaffolding | ✅ Complete |
 | `F-2` `CodeField` | ✅ Complete |
@@ -438,7 +438,7 @@ Found in review and **not** fixed here, because it predates `W-7`: a `value-chan
 that assigns an un-normalised value (`'12 '`) leaves it un-normalised — the `#normalising`
 guard swallows the re-entrant write.
 
-### `W-8` — Base styles (Lumo + Aura via tokens) — ⚠️ **read SPEC §9.1.2 first**
+### `W-8` — Base styles (Lumo + Aura via tokens) — ✅ **COMPLETE**
 **Depends:** `W-5` · **Smaller than originally planned** — `P0-2` established that Vaadin 25
 components ship their own base styles and the themes are token layers, so this is one
 stylesheet, not two theme implementations.
@@ -510,8 +510,16 @@ text field shows the autofill colour; the metrics observer does not re-run when 
 right, the measured advance can go stale); Chrome's own `:autofill` background on the input
 is UA-`!important` and may still tint the cells — check by hand with a real autofill.
 
-Outstanding as `W-8`'s second half: the visual-regression setup in the pinned container,
-the baselines, and CI.
+**Done (baselines).** 96 baselines in `web/test/visual/screenshots/`: base, Lumo and Aura,
+light and dark, the §14.2 states that exist in v1, focused-invalid and focused-readonly,
+and the `small` subset. Generated and
+compared only in `mcr.microsoft.com/playwright:v1.63.0-noble`, by `scripts/visual.sh`
+locally and by CI's `visual` job, which reads the same image tag. Every shot uses
+`prefers-reduced-motion: reduce`, so the caret is still; a unit test asserts the rule
+itself. Checked against a deliberately changed cell gap: every shot failed. Generated on
+arm64; a review run under amd64 emulation, CI's architecture, passed against them. The
+focused-readonly shot exposed a bug from `W-3`/`W-5`: a focused read-only field still
+marked an active cell and drew a caret, against §7.8.5. Fixed, with a unit test. Grouped and masked baselines come with v1.1.
 
 ### `W-9` — Test completion and docs
 **Depends:** `W-5`…`W-8`

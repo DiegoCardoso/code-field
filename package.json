@@ -11,6 +11,8 @@
     "lint:format": "prettier --check \"web/**/*.{js,html}\" \"*.{json,md}\"",
     "format": "prettier --write \"web/**/*.{js,html}\" \"*.{json,md}\"",
     "test": "npm test --workspace web",
+    "test:visual": "scripts/visual.sh",
+    "update:visual": "scripts/visual.sh --update",
     "start": "web-dev-server --open /web/dev/",
     "prepare": "husky",
     "start:lumo": "web-dev-server --open /web/dev/ --theme=lumo:light",

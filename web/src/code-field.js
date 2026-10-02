@@ -1707,7 +1707,9 @@ class CodeField extends InputFieldMixin(ThemeDetectionMixin(ThemableMixin(Elemen
     const value = characters(this.value);
 
     return Array.from({ length: this.length }, (_, index) => {
-      const active = index === this._activeCell;
+      // §7.8.5: a read-only field keeps its selection for copying but marks no target
+      // cell — nothing can be typed, so there is nowhere for the input to go.
+      const active = !this.readonly && index === this._activeCell;
       // Only where the selection is genuinely collapsed — the append position.
       // Everywhere else the active cell is a one-character *selection* (§7.8.1)
       // and typing replaces it, so an insertion point would claim something

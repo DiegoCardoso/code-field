@@ -54,8 +54,18 @@ Two deliberate divergences, both forced:
 
 - **Every push:** lint, format check, unit tests on Chromium **and Firefox**, and the Flow
   module's unit tests and ITs (`mvn verify`, Playwright for Java in both browsers).
-- **Not yet wired:** visual regression (needs baselines from `W-5`/`W-8`; must run in a pinned
-  container — the monorepo uses `mcr.microsoft.com/playwright:v1.63.0-noble`).
+- **Visual regression (SPEC §14.2):** on every push, in the pinned
+  `mcr.microsoft.com/playwright:v1.63.0-noble` container — the only renderer the baselines are
+  valid for. Run it locally with Docker:
+
+  1. `npm run test:visual` compares against the committed baselines.
+  2. `npm run update:visual` regenerates them after an intended visual change.
+  3. Look at every changed image in the diff before you commit it.
+
+  `scripts/visual.sh --clean` removes the container's cached `node_modules` volume.
+
+  A failed run writes the new and diff images to `web/test/visual/screenshots/*/failed/`, which
+  is ignored.
 
 ## Test harness gotchas
 
