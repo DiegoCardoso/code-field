@@ -33,6 +33,7 @@ export default [
     },
   },
   {
-    ignores: ['node_modules/', 'docs/design/', 'web/dev/'],
+    // flow/ holds no hand-written JS; Vaadin writes bundles and generated JS there.
+    ignores: ['node_modules/', 'docs/design/', 'web/dev/', 'flow/'],
   },
 ];

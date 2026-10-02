@@ -176,13 +176,16 @@ bump policy, and JDK 21 in the Maven config and CI.
 0. **Repo shape:** one repo, `web/` and `flow/` as sibling packages, public on GitHub. SPEC's
    "two standalone repos" is superseded (SPEC §1.1) — chiefly because local linking across two
    repos is per-machine `npm link` state that CI cannot reproduce.
-1. **Local path, not early publish.** `flow/` resolves the web package as `file:../web` until
-   `W-7`, then `0.0.x` prereleases begin. Consequence to hold onto: **the Flow ITs cannot run
-   in CI until `W-7`**, because a clean CI checkout has no published package to resolve. Flow
-   CI switches on partway through Phase 1; it is not an `F-1` deliverable.
+1. **Local path, not early publish.** `flow/` resolves the web package as `file:../../web`.
+   The plan was to switch to `0.0.x` prereleases at `W-7`; *revised at `F-1`*, publishing
+   waits until the Flow ITs have something to run (`F-2`/`F-5`), since an npm version cannot
+   be reused and publishing early buys nothing. Consequence to hold onto: **the Flow ITs
+   cannot run in CI until the first publish**, because a clean CI checkout has no published
+   package to resolve. Flow CI switches on partway through Phase 1; it is not an `F-1`
+   deliverable.
 2. **Web CI, on push:** lint, typecheck, unit tests in Chromium **and Firefox**, visual
    regression in a **pinned container** (unpinned renderers rot baselines).
-3. **Flow CI:** ITs **nightly**, from `W-7`.
+3. **Flow CI:** ITs **nightly**, from the first publish (see 1).
 4. **Device matrix:** owner is the author, gate is **`R-1` only**, and the matrix is trimmed to
    hardware that exists — iPhone, desktop Chrome + 1Password. Untestable rows are marked
    `UNTESTED` in SPEC §14.3 and repeated in the README rather than quietly carried. Naming
@@ -216,7 +219,8 @@ Written down because it is the first thing a new session needs and the least rec
 | `W-7` Validation, events | ✅ Complete — **the web value/event surface is frozen; `F-2` may cut the Java API** |
 | `W-8` Base styles | ⬜ Not started — read §9.1.2 first; the derivation table is largely disproved (issue #26) |
 | `W-9` Tests and docs | ⬜ Not started |
-| `F-1`…`F-5` | ⬜ Not started. `F-1` is unblocked and explicitly parallelisable |
+| `F-1` Maven scaffolding | ✅ Complete |
+| `F-2`…`F-5` | ⬜ Not started. `F-2` is unblocked (`W-7` froze the API) |
 
 **180 tests**, green on Chrome and Firefox. Test files run serially (`concurrency: 1`), as
 the paste tests share the OS clipboard. Run with `npm test`; Firefox needs
@@ -272,7 +276,7 @@ event surface has stopped moving (end of `W-7`).
    The mockup (SPEC §9.2) demonstrates the pattern, and it is the fastest way to see §7.6's
    user-originated rule and §7.7's commit ordering actually holding.
 6. CI per `P0-6`: push → lint, typecheck, unit (Chromium + Firefox), visual. Flow ITs are
-   **not** wired yet — they cannot run until `W-7` (`P0-6.1`).
+   **not** wired yet — they cannot run in CI until the first publish (`P0-6.1`).
 7. Commit the `P0-3` canary test into the unit suite.
 
 **Exit:** `npm test` green on an empty component; CI green; dev page loads.
@@ -483,7 +487,7 @@ stylesheet, not two theme implementations.
 
 ## Flow module
 
-### `F-1` — Maven scaffolding
+### `F-1` — Maven scaffolding — ✅ **COMPLETE**
 **Depends:** `P0-5`, `P0-6`
 
 1. Multi-module Maven layout under `flow/`: `code-field-flow`,
@@ -492,13 +496,49 @@ stylesheet, not two theme implementations.
    **`vaadin-flow-components-base`** explicitly — `HasAllowedCharPattern`, `HasTooltip`,
    `HasValidationProperties`, `ValidationUtil` and `InputField` all live there and it is *not*
    transitive via `flow-server`/`flow-data` (`P0-3`).
-3. `@NpmPackage` → `file:../../web` until `W-7`, then `25.2.11`-era published `0.0.x` (`P0-6.1`).
-4. CI per `P0-6`: **ITs are nightly and switch on at `W-7`**, not here.
+3. `@NpmPackage` → `file:../../web`, kept past `W-7`; published `0.0.x` comes with the first
+   ITs (`P0-6.1`, revised).
+4. CI per `P0-6`: **ITs are nightly and switch on at the first publish**, not here.
 
 **Exit:** empty module builds; the IT module starts a Vaadin dev server from a clean checkout
 using the relative path. *(Note: this exit criterion is reachable only because the repo is
 unified — with two repos it would have required a published package or per-machine `npm
 link`.)*
+
+**Done.** `mvn package` builds, and `cd flow && mvn jetty:run` serves a smoke view whose
+`dc-code-field` upgrades in a real browser. Verified from a copy holding only what this change
+commits: no `node_modules`, no `target`. Run it **from `flow/`** (or `-pl
+code-field-flow-integration-tests -am`): from inside the IT module Maven resolves
+`code-field-flow` from `~/.m2`, which is stale or missing. The IT war is never installed or
+deployed. The npm annotations sit on the smoke view, not on a
+`CodeField` class, so the Java API is still F-2's to cut. Found on the way:
+
+- **One field-base, not two.** Vaadin's generated Vite config sets `preserveSymlinks: true`,
+  so the symlinked package's `@vaadin/*` imports resolve from the app's `node_modules`, not
+  the repo root's. field-base's own warning string appears once across the bundle — the
+  ADR-0001 failure does not happen here. Re-check if Vaadin ever drops that setting.
+- **Dev-bundle mode, rebuilt on every start.** Vaadin compiles the frontend once and
+  decides whether to rebuild from the app's own dependencies, so an edit under `web/src` was
+  served stale. The IT module deletes both copies of the bundle at `initialize`; verified by
+  editing `web/src` and seeing the change after a restart. Two traps: Vaadin writes the
+  bundle into `src/main/bundles` as well as `target`, and re-extracts `target`'s copy from
+  it; and Maven merges a clean execution's filesets with the plugin-level ones unless told
+  `combine.self="override"`.
+- **Not hotdeploy: websockets are dropped under `jetty:run`.** Jetty answers `101` and
+  closes the connection with nothing logged, so Vite's HMR client reloads the page in a
+  loop. It is not the sandbox, the ee10/ee11 plugin, a duplicated websocket API or IPv6.
+  Root cause unknown. The app uses no push, and bundle mode needs no websocket, so nothing
+  depends on it; `hotdeploy=false` is pinned so Vaadin cannot switch modes on its own.
+  Revisit if an IT needs push. The dev-tools connection still logs a "websocket closed"
+  *warning* in the console — `F-5` must not fail ITs on console warnings, or must disable
+  dev tools.
+- **Node:** Vaadin 25 refuses the globally installed Node 26 (max 24) and installs its own
+  into `~/.vaadin`.
+
+Deferred from review, deliberately: test dependencies (JUnit, `flow-test-generic`,
+TestBench, failsafe, Jetty start/stop) land with `F-2`/`F-5`, when something uses them;
+pinning the remaining core plugins plus an enforcer rule for JDK 21, and the Central
+metadata (`url`, `licenses`, `scm`, `developers`), land with `R-1`.
 
 ### `F-2` — `CodeField`
 **Depends:** `F-1`, `W-7` (API frozen), `P0-3` (interface list verified)
@@ -638,8 +678,8 @@ Two things to protect:
   long enough gap in between.
 - **`W-7` is the API freeze gate for Flow.** Starting `F-2` before it lands means cutting the
   Java API against a moving value/event surface — the one thing that guarantees doing it twice.
-  It is now **also the gate that switches on Flow CI**, since the ITs cannot resolve the web
-  package before publishing begins (`P0-6.1`).
+  Flow CI is gated separately, on the first publish (`P0-6.1`, revised at `F-1`), since the
+  ITs cannot resolve the web package in CI before then.
 
 `F-1`, `W-8`'s theme scaffolding, and the dev pages are the genuinely parallelisable work —
 which, solo, means "work available when the critical path is blocked", not "work happening

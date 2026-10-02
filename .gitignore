@@ -13,7 +13,19 @@ web/dist/
 
 # Java / Maven
 target/
-flow/**/target/
+
+# Vaadin writes these into the IT module on every dev-server start. The dev bundle in
+# particular must not be committed: built from file:../../web, it is a snapshot of the web
+# component, and the IT module deletes it before every start for exactly that reason.
+flow/code-field-flow-integration-tests/src/main/frontend/generated/
+flow/code-field-flow-integration-tests/src/main/frontend/index.html
+flow/code-field-flow-integration-tests/src/main/bundles/
+flow/code-field-flow-integration-tests/package.json
+flow/code-field-flow-integration-tests/package-lock.json
+flow/code-field-flow-integration-tests/vite.config.ts
+flow/code-field-flow-integration-tests/vite.generated.ts
+flow/code-field-flow-integration-tests/types.d.ts
+flow/code-field-flow-integration-tests/tsconfig.json
 
 # Test artefacts
 coverage/

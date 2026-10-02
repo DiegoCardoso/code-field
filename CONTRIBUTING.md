@@ -11,10 +11,11 @@ constraint is worth real effort and should not be traded away for local convenie
 
 ## Repository
 
-One repo, two packages: `web/` (npm) and `flow/` (Maven), published as two artifacts.
-`flow/` resolves the web package as `file:../web` until `W-7`, then via published `0.0.x`
-prereleases. This is why the repo is unified — across two repos the same link would be
-per-machine `npm link` state that CI cannot reproduce.
+One repo, two packages: `web/` (npm) and `flow/` (Maven), published as two artifacts. `flow/`
+resolves the web package as `file:../../web` until the Flow ITs need a published `0.0.x`
+prerelease (`P0-6.1`). This is why the repo is unified — across two repos the same link would
+be per-machine `npm link` state that CI cannot reproduce. Run the IT dev server from `flow/`:
+`cd flow && mvn jetty:run`.
 
 ## Versions
 
@@ -54,7 +55,7 @@ Two deliberate divergences, both forced:
 - **Every push:** lint, format check, unit tests on Chromium **and Firefox**.
 - **Not yet wired:** visual regression (needs baselines from `W-5`/`W-8`; must run in a pinned
   container — the monorepo uses `mcr.microsoft.com/playwright:v1.63.0-noble`) and Flow ITs
-  (impossible before `W-7`; nightly thereafter).
+  (impossible before the first publish; nightly thereafter).
 
 ## Test harness gotchas
 
