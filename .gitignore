@@ -31,3 +31,5 @@ flow/code-field-flow-integration-tests/tsconfig.json
 coverage/
 screenshots/diff/
 screenshots/current/
+# A failed visual run writes the new and diff images here; only baselines are committed.
+web/test/visual/screenshots/*/failed/

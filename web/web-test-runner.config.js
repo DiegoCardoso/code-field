@@ -15,7 +15,8 @@ export default {
   // that the real signal gets lost. Found while diagnosing a tooltip that never
   // settled: the loop was unusable until this was lowered.
   testsFinishTimeout: 20000,
-  files: ['test/**/*.test.js'],
+  // Visual tests run only in the pinned container (web-test-runner-visual.config.js).
+  files: ['test/**/*.test.js', '!test/visual/**'],
   // One test file at a time. The paste tests use the real OS clipboard (a
   // synthetic ClipboardEvent tests nothing in Firefox), and the clipboard is
   // shared by every page the runner has open — with two files pasting at once,

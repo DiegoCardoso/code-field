@@ -1267,6 +1267,13 @@ Baselines are produced by `@web/test-runner-visual-regression` inside a **pinned
 — a standalone repo has none of the monorepo's screenshot infrastructure, and unpinned
 renderers rot baselines within weeks.
 
+*(Built at `W-8`: 96 baselines — 3 themes (base, Lumo, Aura) × light/dark × the 10 states
+above that exist in v1, plus focused-invalid and focused-readonly (which pin two scoped
+rules), plus the 4-state `small` subset. Grouped and masked wait for v1.1.
+Every shot is taken with `prefers-reduced-motion: reduce`, which freezes the caret; the
+reduced-motion row itself is a unit test in `cells.test.js`, because a broken rule would
+show in the shots only as flakiness. `scripts/visual.sh` runs the same image as CI.)*
+
 ### 14.3 Manual / device matrix
 
 Not coverable headlessly, and this is the part that actually breaks. The iOS path is gated
