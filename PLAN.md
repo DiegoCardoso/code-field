@@ -221,7 +221,8 @@ Written down because it is the first thing a new session needs and the least rec
 | `W-9` Tests and docs | ⬜ Not started |
 | `F-1` Maven scaffolding | ✅ Complete |
 | `F-2` `CodeField` | ✅ Complete |
-| `F-3`…`F-5` | ⬜ Not started. `F-3` is unblocked |
+| `F-3` Event, i18n, validation | ✅ Complete |
+| `F-4`, `F-5` | ⬜ Not started. `F-4` is unblocked |
 
 **186 tests**, green on Chrome and Firefox. Test files run serially (`concurrency: 1`), as
 the paste tests share the OS clipboard. Run with `npm test`; Firefox needs
@@ -593,7 +594,7 @@ which client event synchronises `value` (`change`, or `input` in `EAGER`) is vis
 through Flow internals, so `F-5`'s ITs cover it, as Vaadin's own field tests leave it to
 theirs; the "`mask` is not secrecy" Javadoc lands with `mask` in v1.1.
 
-### `F-3` — Event, i18n, validation
+### `F-3` — Event, i18n, validation — ✅ **COMPLETE**
 **Depends:** `F-2`
 
 1. `CodeCompleteEvent` per SPEC §13.1: `@DomEvent`, `@EventData("event.detail.value")`,
@@ -612,7 +613,37 @@ theirs; the "`mask` is not secrecy" Javadoc lands with `mask` in v1.1.
 5. `CodeFieldVariant.SMALL`.
 
 **Exit:** SPEC §14.4's event bullets pass, including "never fired for a server-set value" and
-the ordering after `ValueChangeEvent`.
+the ordering after `ValueChangeEvent`. *(Revised at review: the server half of "never fired
+for a server-set value" is unit-tested here; the client half and the ordering exist only in
+a browser, so `F-5` owns them.)*
+
+**Done.** 55 JUnit tests across `CodeFieldTest`, `CodeCompleteEventTest`, `ValidationTest`
+and `CodeFieldVariantTest`; the client event is delivered with `ComponentUtil.fireEvent`, as
+Vaadin's own component tests do. Decisions:
+
+- **The forced sync is `synchronizeProperty("value")`** on a `code-complete` DOM listener:
+  Flow applies the client's value, as a client-originated `ValueChangeEvent`, before
+  dispatching the event. Applying the payload on the server instead was rejected — it leaves
+  the element's `value` property stale, so a later `clear()` back to the old value is never
+  sent. The effect exists only on the wire, so no unit test sees it; **checked once by hand
+  in a browser** (`ON_CHANGE` and `EAGER`: value change, then completion, `getValue()` equal
+  to the payload). `F-5` must automate exactly that. Until then, one test-only read of
+  Flow's internal `ElementListenerMap` guards the registration itself.
+- **Validation triggers:** every value change, as `TextField`; plus `setLength` and
+  `setRequiredIndicatorVisible` when the field has a value or is already invalid, matching
+  the client's ratified §8 parity — so a required field does not load showing an error.
+- **The incomplete check is hand-written**, not `ValidationUtil.validateMinLengthConstraint`:
+  that counts UTF-16 units, and §6.5.6 counts code points. `required` uses
+  `validateRequiredConstraint` and is skipped under `Binder`, which has `asRequired()`.
+- **i18n stays on the server.** The client's `manualValidation` is set, so its own i18n never
+  runs; `CodeFieldI18n` is not sent.
+- Two F-2 `Binder` tests now use a complete code: `Binder` rightly refuses to write a
+  partial, now invalid, code to the bean. A test now pins that refusal.
+- **`setI18n` revalidates** a shown error, so a locale switch updates it at once.
+  `TextField` does not; the stale message lasted until the next commit.
+- Known and accepted: a truncating `setLength` shrink validates twice (idempotent), and
+  with `ValueChangeMode` `null` a completion still updates the element's `value` property,
+  without a `ValueChangeEvent`.
 
 ### `F-4` — TestBench element
 **Depends:** `F-2`

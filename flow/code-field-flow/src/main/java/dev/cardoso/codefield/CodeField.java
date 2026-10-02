@@ -4,6 +4,9 @@
  */
 package dev.cardoso.codefield;
 
+import java.util.Objects;
+import java.util.Optional;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
@@ -12,6 +15,7 @@ import org.slf4j.LoggerFactory;
 
 import com.vaadin.flow.component.AbstractField;
 import com.vaadin.flow.component.AbstractSinglePropertyField;
+import com.vaadin.flow.component.ComponentEventListener;
 import com.vaadin.flow.component.Focusable;
 import com.vaadin.flow.component.HasAriaLabel;
 import com.vaadin.flow.component.HasHelper;
@@ -22,12 +26,17 @@ import com.vaadin.flow.component.Tag;
 import com.vaadin.flow.component.dependency.JsModule;
 import com.vaadin.flow.component.dependency.NpmPackage;
 import com.vaadin.flow.component.shared.HasAllowedCharPattern;
+import com.vaadin.flow.component.shared.HasThemeVariant;
 import com.vaadin.flow.component.shared.HasTooltip;
 import com.vaadin.flow.component.shared.HasValidationProperties;
 import com.vaadin.flow.component.shared.InputField;
+import com.vaadin.flow.component.shared.ValidationUtil;
 import com.vaadin.flow.data.binder.HasValidator;
+import com.vaadin.flow.data.binder.ValidationResult;
+import com.vaadin.flow.data.binder.Validator;
 import com.vaadin.flow.data.value.HasValueChangeMode;
 import com.vaadin.flow.data.value.ValueChangeMode;
+import com.vaadin.flow.shared.Registration;
 
 /**
  * A single-value field for short fixed-length codes: one-time passwords, verification codes,
@@ -50,12 +59,12 @@ import com.vaadin.flow.data.value.ValueChangeMode;
 @JsModule("@cardoso/code-field/src/code-field.js")
 public class CodeField extends AbstractSinglePropertyField<CodeField, String>
         implements Focusable<CodeField>, HasAllowedCharPattern, HasAriaLabel, HasHelper,
-        HasLabel, HasSize, HasStyle, HasTooltip, HasValidationProperties, HasValidator<String>,
+        HasLabel, HasSize, HasStyle, HasThemeVariant<CodeFieldVariant>, HasTooltip,
+        HasValidationProperties, HasValidator<String>,
         HasValueChangeMode,
         InputField<AbstractField.ComponentValueChangeEvent<CodeField, String>, String> {
     // SPEC §13 lists HasLabel, HasHelper, HasSize, HasStyle and HasTooltip explicitly although
     // InputField already extends them; kept so the declaration reads like the spec.
-    // HasThemeVariant<CodeFieldVariant> arrives with the variant enum in F-3.
 
     private static final Logger LOGGER = LoggerFactory.getLogger(CodeField.class);
 
@@ -80,11 +89,36 @@ public class CodeField extends AbstractSinglePropertyField<CodeField, String>
 
     private int valueChangeTimeout = DEFAULT_CHANGE_TIMEOUT;
 
+    private CodeFieldI18n i18n;
+
+    private boolean manualValidation;
+
+    /** The message validation last wrote, so a developer-set one is told apart (ADR-0002). */
+    private String lastValidationErrorMessage;
+
     /** Constructs an empty field. */
     public CodeField() {
         super("value", "", false);
         // HasValueChangeMode defines no default, so it is set here, as TextField does.
         setValueChangeMode(ValueChangeMode.ON_CHANGE);
+
+        // §7.7's forced sync: the client sends `value` with every code-complete, and Flow
+        // applies it — as a client-originated ValueChangeEvent — before dispatching the
+        // event, so getValue() inside a CodeCompleteEvent listener is the completed code.
+        // Without it, an EAGER field's code-complete overtakes its `input` sync (the client
+        // fires `change` and `code-complete` before the host sees `input`), and an ON_CHANGE
+        // field relies on `change` happening to be processed first. It stays registered even
+        // with ValueChangeMode null ("never synchronise"): a completion then updates the
+        // element's value property without a ValueChangeEvent — set a mode to read values.
+        getElement().addEventListener("code-complete", event -> {
+        }).synchronizeProperty("value");
+
+        // The server owns validation (ADR-0002): otherwise the client validates too, with
+        // its own i18n, and the two disagree.
+        getElement().setProperty("manualValidation", true);
+        // As TextField: works around https://github.com/vaadin/flow/issues/3496.
+        setInvalid(false);
+        addValueChangeListener(event -> validate());
     }
 
     /**
@@ -166,6 +200,148 @@ public class CodeField extends AbstractSinglePropertyField<CodeField, String>
     }
 
     /**
+     * Adds a listener for the user completing the code: the place to verify it. Never called
+     * for a value set from the server (SPEC §7.6), and called after the
+     * {@code ValueChangeEvent} for the completed value, so {@link #getValue()} agrees with
+     * {@link CodeCompleteEvent#getValue()}.
+     *
+     * @param listener
+     *            the listener
+     * @return a registration for removing the listener
+     */
+    public Registration addCodeCompleteListener(
+            ComponentEventListener<CodeCompleteEvent> listener) {
+        return addListener(CodeCompleteEvent.class, listener);
+    }
+
+    /**
+     * Sets the error messages for the field's two constraints. An error already shown is
+     * revalidated, so a locale switch updates it at once.
+     *
+     * @param i18n
+     *            the messages, not {@code null}
+     */
+    public void setI18n(CodeFieldI18n i18n) {
+        this.i18n = Objects.requireNonNull(i18n, "The i18n object should not be null");
+        revalidateIfShown();
+    }
+
+    /**
+     * Gets the error messages previously set. The field reads them at each validation, so a
+     * change to the returned object shows at the next one; set it again to apply it at once.
+     *
+     * @return the i18n object, or {@code null} if none was set
+     */
+    public CodeFieldI18n getI18n() {
+        return i18n;
+    }
+
+    /**
+     * {@inheritDoc}
+     * <p>
+     * The two constraints (SPEC §8): a required field must not be empty, and a code must not be
+     * partly entered. {@code required} is checked only when the component validates itself;
+     * {@code Binder} implements it with {@code asRequired()}. Lengths count characters (code
+     * points), which is why the incomplete check is not
+     * {@code ValidationUtil.validateMinLengthConstraint}: that counts UTF-16 units.
+     */
+    @Override
+    public Validator<String> getDefaultValidator() {
+        return defaultValidator;
+    }
+
+    private final Validator<String> defaultValidator = (value, context) -> {
+            boolean fromComponent = context == null;
+            if (fromComponent) {
+                ValidationResult required = ValidationUtil.validateRequiredConstraint(
+                        i18nMessage(CodeFieldI18n::getRequiredErrorMessage),
+                        isRequiredIndicatorVisible(), value, getEmptyValue());
+                if (required.isError()) {
+                    return required;
+                }
+            }
+
+            int characters = value == null ? 0 : value.codePointCount(0, value.length());
+            if (characters > 0 && characters < getLength()) {
+                return ValidationResult
+                        .error(i18nMessage(CodeFieldI18n::getIncompleteErrorMessage));
+            }
+            return ValidationResult.ok();
+        };
+
+    @Override
+    public void setManualValidation(boolean enabled) {
+        this.manualValidation = enabled;
+    }
+
+    /**
+     * Validates the value against the field's constraints and updates {@code invalid} and the
+     * error message. Runs on every value change, and when {@code length} or
+     * {@code required} changes under a value or an error. Does nothing in manual validation
+     * mode.
+     */
+    protected void validate() {
+        if (manualValidation) {
+            return;
+        }
+
+        ValidationResult result = getDefaultValidator().apply(getValue(), null);
+        setInvalid(result.isError());
+        applyErrorMessage(result.isError() ? result.getErrorMessage() : "");
+    }
+
+    /**
+     * ADR-0002: the one ValidationController behaviour we reproduce rather than inherit. A
+     * message the developer set is never overwritten: validation writes only while the
+     * message is empty or still the one validation itself wrote last.
+     */
+    private void applyErrorMessage(String message) {
+        String current = getErrorMessage();
+        boolean developerSet = current != null && !current.isEmpty()
+                && !current.equals(lastValidationErrorMessage);
+        if (!developerSet) {
+            setErrorMessage(message);
+        }
+        lastValidationErrorMessage = message;
+    }
+
+    /** Re-checks a verdict that a constraint change may have altered, as the client does. */
+    private void revalidateIfShown() {
+        if (!isEmpty() || isInvalid()) {
+            validate();
+        }
+    }
+
+    private String i18nMessage(Function<CodeFieldI18n, String> getter) {
+        return Optional.ofNullable(i18n).map(getter).orElse("");
+    }
+
+    /**
+     * {@inheritDoc}
+     * <p>
+     * A message set here takes priority over the {@link CodeFieldI18n} messages, and
+     * validation does not overwrite it. Set it to empty to let validation's own messages show
+     * again. One exception: a message identical to the one validation last showed cannot be
+     * told apart from it, so validation treats it as its own.
+     */
+    @Override
+    public void setErrorMessage(String errorMessage) {
+        HasValidationProperties.super.setErrorMessage(errorMessage);
+    }
+
+    /**
+     * {@inheritDoc}
+     * <p>
+     * Revalidates when the field has a value or is already invalid, so an untouched empty
+     * field does not load showing an error.
+     */
+    @Override
+    public void setRequiredIndicatorVisible(boolean required) {
+        super.setRequiredIndicatorVisible(required);
+        revalidateIfShown();
+    }
+
+    /**
      * Whether the value fills every cell. Computed from {@link #getValue()} and
      * {@link #getLength()} rather than read from the client's {@code complete} property,
      * which never synchronises on its own; this way it always agrees with {@code getValue()}.
@@ -228,6 +404,8 @@ public class CodeField extends AbstractSinglePropertyField<CodeField, String>
         // §6.5.3: shrinking truncates the value, with the setter's warning. The client
         // truncates too, but reports nothing back.
         reapplyValueRules();
+        // Growing it can make a complete code partial without changing the value.
+        revalidateIfShown();
     }
 
     /**
