@@ -60,6 +60,19 @@ browser and one extension suffice.
 - SPEC §7.5 updated with a 1Password/Chrome answer on TOTP fill, **scoped as such**.
 - Bitwarden, LastPass and Firefox recorded as `UNTESTED` in §14.3 and in the README.
 
+**Probe kit:** [`web/dev/p0-1-probe.html`](./web/dev/p0-1-probe.html). Open it with
+`npm start`. The page holds the steps above as a procedure, and logs badge geometry and
+fill events. It also has a widen-and-clip lab on the real component, and copies the results
+as Markdown.
+
+**Measured before the probe, headless Chromium, no extension:** with a 40px widen, all
+three clip strategies resolve a click on the last cell to that cell. On a full code the
+selection is `[5, 6]`, and on `12345` it is `[5, 5]`. Under Lumo, `overflow: hidden` on the
+container clips the active cell's ring, because the container has no padding. `clip-path`
+on the input keeps the ring. `overflow: clip` with a 4px `overflow-clip-margin` keeps it
+too, but exposes 4px of the overhang. This supports §11.6's preference for `clip-path`. The
+widen constant still needs the real badge.
+
 ### `P0-2` — Third-party Aura authoring — ✅ **RESOLVED** (see [P0-FINDINGS.md](./P0-FINDINGS.md))
 **Closes:** SPEC §9, §12.1.2 · **Blocks:** `W-8`, and `W-1`'s dependency set
 
