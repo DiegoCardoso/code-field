@@ -40,7 +40,38 @@ const characters = (value) => Array.from(asText(value));
  * tab stop, SMS autofill, password-manager fill, partial paste and native
  * selection all work without being reimplemented. See SPEC §4.
  *
- * @customElement
+ * The tags below feed the custom elements manifest. The API inherited from
+ * `InputFieldMixin` comes from `@vaadin/field-base`'s own manifest.
+ *
+ * @slot label - The label text.
+ * @slot helper - The helper text.
+ * @slot error-message - The error message.
+ * @slot tooltip - A `<vaadin-tooltip>` for the field.
+ * @slot input - The `<input>` the field creates. Do not slot one yourself.
+ *
+ * @csspart label - The label element.
+ * @csspart required-indicator - The required indicator element.
+ * @csspart input-field - The `<vaadin-input-container>` that holds the cells.
+ * @csspart cells - The row of cells.
+ * @csspart cell - One cell. Has the `active`, `filled` and `cell-index` attributes.
+ * @csspart caret - The caret, in the active cell at the append position only.
+ * @csspart helper-text - The helper text element.
+ * @csspart error-message - The error message element.
+ *
+ * @cssprop --vaadin-code-field-cell-gap - The gap between cells.
+ * @cssprop --vaadin-code-field-cell-width - The width of a cell before it shrinks.
+ * @cssprop --vaadin-code-field-cell-radius - The border radius of a cell.
+ * @cssprop --vaadin-code-field-caret-width - The width of the caret.
+ * @cssprop --vaadin-code-field-caret-color - The colour of the caret.
+ *
+ * @fires {Event} input - Fired when the user changes the value, paste and drop included.
+ * @fires {Event} change - Fired when the user commits the value: on blur, Enter, and completion.
+ * @fires {CustomEvent} code-complete - Fired when the user fills the last cell. `detail.value` is the code.
+ * @fires {CustomEvent} value-changed - Fired when the `value` property changes, programmatic changes included.
+ * @fires {CustomEvent} invalid-changed - Fired when the `invalid` property changes.
+ * @fires {CustomEvent} validated - Fired whenever the field is validated.
+ *
+ * @customElement dc-code-field
  * @extends HTMLElement
  */
 class CodeField extends InputFieldMixin(ThemeDetectionMixin(ThemableMixin(ElementMixin(PolylitMixin(LitElement))))) {
@@ -176,6 +207,8 @@ class CodeField extends InputFieldMixin(ThemeDetectionMixin(ThemableMixin(Elemen
        * Whether the code fills every cell. Read-only, reflected, and **derived
        * rather than latched** (SPEC §7.7) — deleting a character makes it false
        * again.
+       *
+       * @readonly
        */
       complete: {
         type: Boolean,

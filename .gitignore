@@ -33,3 +33,7 @@ screenshots/diff/
 screenshots/current/
 # A failed visual run writes the new and diff images here; only baselines are committed.
 web/test/visual/screenshots/*/failed/
+
+# Custom elements manifest: `npm run analyze` writes it, and `prepack` runs that before
+# every pack and publish, as Vaadin does. Committed, it would go stale on the next edit.
+web/custom-elements.json
