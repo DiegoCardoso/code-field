@@ -16,7 +16,8 @@
     "start": "web-dev-server --open /web/dev/",
     "prepare": "husky",
     "start:lumo": "web-dev-server --open /web/dev/ --theme=lumo:light",
-    "start:aura": "web-dev-server --open /web/dev/ --theme=aura:light"
+    "start:aura": "web-dev-server --open /web/dev/ --theme=aura:light",
+    "storybook": "npm run storybook --workspace web"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.0.0",
